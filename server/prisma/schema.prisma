@@ -1,0 +1,302 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  BRANCH_MANAGER
+  CASHIER
+  BARISTA
+  KITCHEN_STAFF
+}
+
+enum OrderType {
+  DINE_IN
+  TAKE_AWAY
+  DELIVERY
+  DRIVE_THROUGH
+  QUICK_SALE
+}
+
+enum OrderStatus {
+  PENDING
+  PREPARING
+  READY
+  SERVED
+  COMPLETED
+  CANCELLED
+}
+
+enum TableStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  CLEANING
+}
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  ABA_KHQR
+  BAKONG
+  ACLEDA
+  WING
+  PI_PAY
+  ALIPAY
+  WECHAT_PAY
+  APPLE_PAY
+  GOOGLE_PAY
+  SPLIT_PAYMENT
+  MIXED
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+model Store {
+  id          String   @id @default(uuid())
+  name        String
+  code        String   @unique
+  logo        String?
+  taxNumber   String?
+  branches    Branch[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Branch {
+  id          String   @id @default(uuid())
+  storeId     String
+  store       Store    @relation(fields: [storeId], references: [id], onDelete: Cascade)
+  name        String
+  code        String   @unique
+  address     String
+  phone       String
+  users       User[]
+  tables      DiningTable[]
+  orders      Order[]
+  shifts      Shift[]
+  inventory   Inventory[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id           String    @id @default(uuid())
+  branchId     String?
+  branch       Branch?   @relation(fields: [branchId], references: [id])
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(CASHIER)
+  phone        String?
+  avatar       String?
+  isActive     Boolean   @default(true)
+  orders       Order[]
+  shifts       Shift[]
+  auditLogs    AuditLog[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Category {
+  id          String        @id @default(uuid())
+  name        String
+  slug        String        @unique
+  description String?
+  image       String?
+  sortOrder   Int           @default(0)
+  isActive    Boolean       @default(true)
+  subcategories Subcategory[]
+  products    Product[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model Subcategory {
+  id          String    @id @default(uuid())
+  categoryId  String
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String
+  products    Product[]
+}
+
+model Product {
+  id           String           @id @default(uuid())
+  name         String
+  description  String?
+  sku          String           @unique
+  barcode      String?          @unique
+  categoryId   String
+  category     Category         @relation(fields: [categoryId], references: [id])
+  subcategoryId String?
+  subcategory  Subcategory?     @relation(fields: [subcategoryId], references: [id])
+  costPrice    Decimal          @db.Decimal(10, 2)
+  sellingPrice Decimal          @db.Decimal(10, 2)
+  happyHourPrice Decimal?       @db.Decimal(10, 2)
+  image        String?
+  isAvailable  Boolean          @default(true)
+  variants     ProductVariant[]
+  recipes      Recipe[]
+  orderItems   OrderItem[]
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+}
+
+model ProductVariant {
+  id          String   @id @default(uuid())
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name        String   // Small, Medium, Large
+  priceOffset Decimal  @db.Decimal(10, 2) @default(0)
+  sku         String?
+}
+
+model Ingredient {
+  id            String              @id @default(uuid())
+  name          String
+  unit          String              // g, ml, pcs
+  currentStock  Decimal             @db.Decimal(10, 2)
+  minStockAlert Decimal             @db.Decimal(10, 2)
+  costPerUnit   Decimal             @db.Decimal(10, 2)
+  recipes       RecipeIngredient[]
+  inventory     Inventory[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+}
+
+model Recipe {
+  id          String             @id @default(uuid())
+  productId   String
+  product     Product            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantName String?            // e.g. Medium
+  ingredients RecipeIngredient[]
+  prepTimeSec Int                @default(120)
+  createdAt   DateTime           @default(now())
+}
+
+model RecipeIngredient {
+  id           String     @id @default(uuid())
+  recipeId     String
+  recipe       Recipe     @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  quantity     Decimal    @db.Decimal(10, 2)
+}
+
+model Inventory {
+  id           String     @id @default(uuid())
+  branchId     String
+  branch       Branch     @relation(fields: [branchId], references: [id])
+  ingredientId String
+  ingredient   Ingredient @relation(fields: [ingredientId], references: [id])
+  stockOnHand  Decimal    @db.Decimal(10, 2)
+  updatedAt    DateTime   @updatedAt
+}
+
+model Customer {
+  id             String     @id @default(uuid())
+  name           String
+  phone          String     @unique
+  email          String?
+  loyaltyPoints  Int        @default(0)
+  tier           String     @default("Bronze")
+  walletBalance  Decimal    @db.Decimal(10, 2) @default(0)
+  birthday       DateTime?
+  orders         Order[]
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+}
+
+model DiningTable {
+  id           String      @id @default(uuid())
+  branchId     String
+  branch       Branch      @relation(fields: [branchId], references: [id])
+  tableNumber  String      @unique
+  name         String
+  capacity     Int
+  status       TableStatus @default(AVAILABLE)
+  floorSection String      @default("Main Floor")
+  orders       Order[]
+}
+
+model Shift {
+  id             String      @id @default(uuid())
+  branchId       String
+  branch         Branch      @relation(fields: [branchId], references: [id])
+  userId         String
+  user           User        @relation(fields: [userId], references: [id])
+  status         ShiftStatus @default(OPEN)
+  startingFloat  Decimal     @db.Decimal(10, 2)
+  cashIn         Decimal     @db.Decimal(10, 2) @default(0)
+  cashOut        Decimal     @db.Decimal(10, 2) @default(0)
+  expectedCash   Decimal?    @db.Decimal(10, 2)
+  actualCash     Decimal?    @db.Decimal(10, 2)
+  discrepancy    Decimal?    @db.Decimal(10, 2)
+  openedAt       DateTime    @default(now())
+  closedAt       DateTime?
+}
+
+model Order {
+  id             String      @id @default(uuid())
+  branchId       String
+  branch         Branch      @relation(fields: [branchId], references: [id])
+  orderNumber    String      @unique
+  type           OrderType   @default(DINE_IN)
+  status         OrderStatus @default(PENDING)
+  tableId        String?
+  table          DiningTable? @relation(fields: [tableId], references: [id])
+  customerId     String?
+  customer       Customer?   @relation(fields: [customerId], references: [id])
+  userId         String
+  user           User        @relation(fields: [userId], references: [id])
+  
+  subtotal       Decimal     @db.Decimal(10, 2)
+  discountAmount Decimal     @db.Decimal(10, 2) @default(0)
+  taxAmount      Decimal     @db.Decimal(10, 2) @default(0)
+  totalAmount    Decimal     @db.Decimal(10, 2)
+  
+  items          OrderItem[]
+  payments       Payment[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id])
+  variantName String?
+  quantity    Int
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  subtotal    Decimal  @db.Decimal(10, 2)
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  orderId       String
+  order         Order         @relation(fields: [orderId], references: [id])
+  method        PaymentMethod
+  amountPaid    Decimal       @db.Decimal(10, 2)
+  changeAmount  Decimal       @db.Decimal(10, 2) @default(0)
+  createdAt     DateTime      @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  details   String?
+  createdAt DateTime @default(now())
+}
