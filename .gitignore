@@ -1,0 +1,23 @@
+# Build and Cache
+dist
+dist-ssr
+client/dist
+server/dist
+.vite
+client/node_modules/.vite
+
+# Environment and sensitive keys
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# OS and Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
