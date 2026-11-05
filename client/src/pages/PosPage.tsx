@@ -337,9 +337,9 @@ export const PosPage: React.FC = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-6rem)] grid grid-cols-1 lg:grid-cols-12 gap-6 overflow-hidden font-sans">
+    <div className="h-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 overflow-hidden font-sans">
       {/* Left Area: Product Menu & Category Sidebar (8 Columns) */}
-      <div className="lg:col-span-8 flex flex-col h-full space-y-4 min-w-0">
+      <div className="lg:col-span-8 flex flex-col h-full min-h-0 space-y-3 min-w-0">
         {/* Top Control Toolbar: Categories + Enterprise Action Buttons */}
         <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 scrollbar-none flex-shrink-0">
           <div className="flex items-center space-x-2">
@@ -496,7 +496,7 @@ export const PosPage: React.FC = () => {
         </div>
 
         {/* Products Touch Grid */}
-        <div className="flex-1 overflow-y-auto pr-1">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-20 scrollbar-thin">
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
             {filteredProducts.map((product) => {
               const cartQty = cart
@@ -618,7 +618,7 @@ export const PosPage: React.FC = () => {
       </div>
 
       {/* Right Area: Order Cart Workspace (4 Columns) */}
-      <div className="lg:col-span-4 bg-stone-900/90 border border-amber-700/30 rounded-3xl p-5 flex flex-col justify-between glass-panel h-full shadow-2xl overflow-hidden">
+      <div className="lg:col-span-4 bg-stone-900/90 border border-amber-700/30 rounded-3xl p-5 flex flex-col justify-between glass-panel h-full min-h-0 shadow-2xl overflow-hidden">
         {/* Order Header & Type Selector */}
         <div className="space-y-4 flex-shrink-0">
           <div className="flex items-center justify-between">
@@ -663,7 +663,7 @@ export const PosPage: React.FC = () => {
         </div>
 
         {/* Cart Item Stream */}
-        <div className="flex-1 overflow-y-auto my-4 space-y-2.5 pr-1">
+        <div className="flex-1 min-h-0 overflow-y-auto my-3 space-y-2.5 pr-1">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2">
               <div className="w-12 h-12 rounded-2xl bg-stone-800/60 border border-stone-700 flex items-center justify-center text-stone-500">
