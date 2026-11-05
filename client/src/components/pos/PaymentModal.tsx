@@ -120,37 +120,82 @@ export const PaymentModal: React.FC<Props> = ({ order, onClose, onPaymentComplet
               {selectedMethod === 'CASH' ? (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center pb-3 border-b border-stone-800">
-                    <span className="text-xs text-stone-400">Total Payable</span>
-                    <span className="text-xl font-mono font-bold text-amber-400">${order.totalAmount.toFixed(2)}</span>
+                    <div>
+                      <span className="text-xs text-stone-400 block">Total Payable</span>
+                      <span className="text-[11px] text-amber-500 font-mono font-bold">
+                        ៛ {Math.round(order.totalAmount * 4100).toLocaleString()} KHR
+                      </span>
+                    </div>
+                    <span className="text-2xl font-mono font-extrabold text-amber-400">${order.totalAmount.toFixed(2)}</span>
                   </div>
 
                   <div>
-                    <label className="text-xs font-semibold text-stone-400 block mb-1">Tendered Cash (USD)</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs font-semibold text-stone-300">Tendered Cash (USD $)</label>
+                      <button
+                        type="button"
+                        onClick={() => setCashTendered(order.totalAmount.toFixed(2))}
+                        className="text-[11px] font-bold text-amber-400 hover:underline"
+                      >
+                        Exact Cash (${order.totalAmount.toFixed(2)})
+                      </button>
+                    </div>
                     <input
                       type="number"
                       step="0.01"
                       value={cashTendered}
                       onChange={(e) => setCashTendered(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl glass-input text-2xl font-mono font-bold text-emerald-400 focus:outline-none"
+                      className="w-full px-4 py-2.5 rounded-xl glass-input text-2xl font-mono font-bold text-emerald-400 focus:outline-none"
                     />
                   </div>
 
-                  {/* Quick Cash Presets */}
-                  <div className="grid grid-cols-4 gap-2">
-                    {[5, 10, 20, 50].map((amt) => (
-                      <button
-                        key={amt}
-                        onClick={() => setCashTendered(amt.toFixed(2))}
-                        className="py-2 bg-stone-800 border border-stone-700 rounded-xl text-xs font-bold text-stone-200 hover:bg-amber-600 hover:text-stone-950 transition-colors"
-                      >
-                        ${amt}
-                      </button>
-                    ))}
+                  {/* Quick Cash Presets USD */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] text-stone-400 font-bold uppercase tracking-wider block">USD Fast Presets ($)</span>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {[1, 5, 10, 20, 50, 100].map((amt) => (
+                        <button
+                          key={`usd-${amt}`}
+                          onClick={() => setCashTendered(amt.toFixed(2))}
+                          className="py-2 bg-stone-800/90 border border-stone-700/80 rounded-xl text-xs font-bold text-stone-200 hover:bg-amber-600 hover:text-stone-950 transition-colors"
+                        >
+                          ${amt}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
+                  {/* Quick Cash Presets KHR */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] text-stone-400 font-bold uppercase tracking-wider block">Khmer Riel Fast Presets (៛)</span>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {[
+                        { khr: '10,000', usd: 10000 / 4100 },
+                        { khr: '20,000', usd: 20000 / 4100 },
+                        { khr: '40,000', usd: 40000 / 4100 },
+                        { khr: '50,000', usd: 50000 / 4100 },
+                        { khr: '100,000', usd: 100000 / 4100 },
+                      ].map((item) => (
+                        <button
+                          key={item.khr}
+                          onClick={() => setCashTendered(item.usd.toFixed(2))}
+                          className="py-1.5 bg-amber-950/40 border border-amber-700/40 rounded-xl text-[11px] font-bold text-amber-300 hover:bg-amber-600 hover:text-stone-950 transition-colors"
+                        >
+                          ៛{item.khr}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Dual Currency Change Return Display */}
                   <div className="p-3 bg-stone-900 border border-stone-800 rounded-xl flex justify-between items-center">
-                    <span className="text-xs text-stone-400">Change Return</span>
-                    <span className={`text-lg font-mono font-bold ${changeDue > 0 ? 'text-emerald-400' : 'text-stone-500'}`}>
+                    <div>
+                      <span className="text-xs text-stone-400 block font-semibold">Change Return (ប្រាក់អាប់)</span>
+                      <span className="text-[11px] font-mono text-emerald-400 font-bold">
+                        ៛ {Math.round(changeDue * 4100).toLocaleString()} KHR
+                      </span>
+                    </div>
+                    <span className={`text-xl font-mono font-extrabold ${changeDue > 0 ? 'text-emerald-400' : 'text-stone-500'}`}>
                       ${changeDue.toFixed(2)}
                     </span>
                   </div>

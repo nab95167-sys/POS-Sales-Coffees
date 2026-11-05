@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, ShoppingCart, Trash2, Plus, Minus, Tag, DollarSign, 
   CreditCard, ArrowRightLeft, PauseCircle, PlayCircle, Coffee, Check, Barcode, 
-  Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu, CheckCircle2
+  Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu, CheckCircle2,
+  ShieldCheck, KeyRound, ShieldAlert, FileText, Ban
 } from 'lucide-react';
 import { Product, CartItem, Order, OrderType, PaymentMethod, Category } from '../types';
 import { VariantToppingModal } from '../components/pos/VariantToppingModal';
@@ -16,11 +17,15 @@ import { RecipeModal } from '../components/products/RecipeModal';
 import { QrSelfOrderModal } from '../components/pos/QrSelfOrderModal';
 import { GiftCardWalletModal } from '../components/pos/GiftCardWalletModal';
 import { AiBaristaModal } from '../components/analytics/AiBaristaModal';
+import { ManagerPinModal } from '../components/pos/ManagerPinModal';
+import { PosScreenLockModal } from '../components/pos/PosScreenLockModal';
+import { SecurityAuditModal } from '../components/pos/SecurityAuditModal';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useProducts } from '../context/ProductContext';
 import { sendTelegramSaleAlert } from '../services/telegramBotService';
 import { soundEffects } from '../services/soundService';
+import { logSecurityEvent } from '../services/securityAuditService';
 
 export const PosPage: React.FC = () => {
   const { user } = useAuth();
@@ -37,6 +42,15 @@ export const PosPage: React.FC = () => {
   const [couponCode, setCouponCode] = useState<string>('');
   const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
   const [lastScannedItem, setLastScannedItem] = useState<string | null>(null);
+
+  // Security & Lock State
+  const [isScreenLocked, setIsScreenLocked] = useState(false);
+  const [showSecurityAuditModal, setShowSecurityAuditModal] = useState(false);
+  const [managerPinAction, setManagerPinAction] = useState<{
+    title: string;
+    details: string;
+    onApproved: () => void;
+  } | null>(null);
 
   // Modals State
   const [customizeProduct, setCustomizeProduct] = useState<Product | null>(null);
@@ -171,6 +185,67 @@ export const PosPage: React.FC = () => {
     );
   };
 
+  const toggleItemNote = (cartItemId: string, noteText: string) => {
+    soundEffects.playBeep();
+    setCart((prev) =>
+      prev.map((item) => {
+        if (item.cartItemId === cartItemId) {
+          const currentNotes = item.notes ? item.notes.split(', ') : [];
+          const exists = currentNotes.includes(noteText);
+          const newNotes = exists
+            ? currentNotes.filter((n) => n !== noteText)
+            : [...currentNotes, noteText];
+          return {
+            ...item,
+            notes: newNotes.length > 0 ? newNotes.join(', ') : undefined,
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const handleRequestVoidCart = () => {
+    if (cart.length === 0) return;
+    setManagerPinAction({
+      title: 'Void Entire Cart (បោះបង់ការកុម្ម៉ង់)',
+      details: `Clear all ${cart.length} items from register (Subtotal: $${subtotal.toFixed(2)})`,
+      onApproved: () => {
+        setCart([]);
+        setDiscountPercent(0);
+        soundEffects.playBeep();
+        logSecurityEvent(
+          'CART_VOID',
+          'Cart Voided',
+          `Cleared ${cart.length} items ($${subtotal.toFixed(2)})`,
+          user?.name || 'Cashier',
+          'Manager (PIN: 1234)',
+          'WARNING'
+        );
+        alert('Cart voided successfully by Manager authorization.');
+      },
+    });
+  };
+
+  const handleOpenCashDrawerNoSale = () => {
+    setManagerPinAction({
+      title: 'Open Cash Drawer (No Sale / បើកថតលុយ)',
+      details: 'Manual drawer kick for physical cash count or change exchange',
+      onApproved: () => {
+        soundEffects.playCashRegister();
+        logSecurityEvent(
+          'DRAWER_KICK',
+          'Cash Drawer Opened (No Sale)',
+          'Manual drawer kick approved via Manager PIN',
+          user?.name || 'Cashier',
+          'Manager (PIN: 1234)',
+          'WARNING'
+        );
+        alert('Cash drawer solenoid triggered & opened!');
+      },
+    });
+  };
+
   const subtotal = cart.reduce((sum, item) => sum + item.itemSubtotal, 0);
   const discountAmount = subtotal * (discountPercent / 100);
   const taxableSubtotal = Math.max(0, subtotal - discountAmount);
@@ -288,6 +363,41 @@ export const PosPage: React.FC = () => {
           </div>
 
           <div className="flex items-center space-x-2">
+            <button
+              onClick={() => {
+                logSecurityEvent(
+                  'SCREEN_LOCK',
+                  'Terminal Locked',
+                  'Cashier manually locked register screen',
+                  user?.name || 'Staff'
+                );
+                setIsScreenLocked(true);
+              }}
+              className="px-3 py-2 rounded-2xl bg-amber-950/60 border border-amber-600/50 hover:bg-amber-900/60 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-sm"
+              title="Lock Register Screen (ចាក់សោអេក្រង់)"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">Lock POS</span>
+            </button>
+
+            <button
+              onClick={handleOpenCashDrawerNoSale}
+              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-500 text-stone-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              title="Open Cash Drawer (No Sale / បើកថតលុយ)"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">No Sale</span>
+            </button>
+
+            <button
+              onClick={() => setShowSecurityAuditModal(true)}
+              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-emerald-500/50 text-emerald-400 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              title="View Security & Anti-Theft Audit Trail"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden xl:inline">Audit Log</span>
+            </button>
+
             <button
               onClick={() => setShowAiBaristaModal(true)}
               className="px-3 py-2 rounded-2xl bg-gradient-to-r from-amber-950 to-stone-900 border border-amber-500/50 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-md"
@@ -462,9 +572,22 @@ export const PosPage: React.FC = () => {
               <ShoppingCart className="w-5 h-5 text-amber-400" />
               <h3 className="text-base font-bold text-stone-100">{t('currentOrder')}</h3>
             </div>
-            <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2.5 py-1 rounded-full border border-amber-900/40">
-              {cart.length} {t('items')}
-            </span>
+            <div className="flex items-center space-x-2">
+              {cart.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleRequestVoidCart}
+                  className="px-2 py-0.5 rounded-lg bg-red-950/60 border border-red-700/50 text-red-300 hover:bg-red-900/60 text-[10px] font-bold flex items-center space-x-1 transition-colors"
+                  title="Void Cart (Manager PIN required)"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Void Cart</span>
+                </button>
+              )}
+              <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2.5 py-1 rounded-full border border-amber-900/40">
+                {cart.length} {t('items')}
+              </span>
+            </div>
           </div>
 
           {/* Order Type Selector */}
@@ -515,14 +638,46 @@ export const PosPage: React.FC = () => {
                 </div>
 
                 {/* Variant & Toppings info */}
-                {(item.selectedVariant || item.selectedToppings.length > 0) && (
+                {(item.selectedVariant || item.selectedToppings.length > 0 || item.notes) && (
                   <div className="text-[10px] text-stone-400 pl-2 border-l border-amber-600/40 space-y-0.5">
                     {item.selectedVariant && <div>Size: {item.selectedVariant.name}</div>}
                     {item.selectedToppings.length > 0 && (
                       <div>+ {item.selectedToppings.map((tp) => tp.name).join(', ')}</div>
                     )}
+                    {item.notes && (
+                      <div className="text-amber-400 font-bold bg-amber-950/40 px-1.5 py-0.5 rounded text-[9px] inline-block">
+                        📝 {item.notes}
+                      </div>
+                    )}
                   </div>
                 )}
+
+                {/* 1-Click Fast Modifier Chips */}
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {[
+                    'ផ្អែម 50%',
+                    'ផ្អែម 0%',
+                    'ទឹកកកតិច',
+                    'ក្ដៅខ្លាំង',
+                    'កែវផ្ទាល់ខ្លួន',
+                  ].map((tag) => {
+                    const active = item.notes?.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleItemNote(item.cartItemId, tag)}
+                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-all ${
+                          active
+                            ? 'bg-amber-500 text-stone-950 shadow-sm'
+                            : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-stone-200'
+                        }`}
+                      >
+                        {tag}
+                      </button>
+                    );
+                  })}
+                </div>
 
                 {/* Quantity Controller & Subtotal */}
                 <div className="flex items-center justify-between pt-1 border-t border-stone-800/60">
@@ -754,6 +909,36 @@ export const PosPage: React.FC = () => {
         <ThermalReceiptModal
           order={completedReceiptOrder}
           onClose={() => setCompletedReceiptOrder(null)}
+        />
+      )}
+
+      {/* Quick Screen Lock Modal */}
+      {isScreenLocked && (
+        <PosScreenLockModal
+          user={user}
+          onUnlock={() => setIsScreenLocked(false)}
+        />
+      )}
+
+      {/* Manager Authorization PIN Modal */}
+      {managerPinAction && (
+        <ManagerPinModal
+          actionTitle={managerPinAction.title}
+          actionDetails={managerPinAction.details}
+          performedBy={user?.name || 'Cashier'}
+          onSuccess={() => {
+            const approvedCallback = managerPinAction.onApproved;
+            setManagerPinAction(null);
+            approvedCallback();
+          }}
+          onClose={() => setManagerPinAction(null)}
+        />
+      )}
+
+      {/* Security Audit Trail & Anti-Theft Log Modal */}
+      {showSecurityAuditModal && (
+        <SecurityAuditModal
+          onClose={() => setShowSecurityAuditModal(false)}
         />
       )}
 
