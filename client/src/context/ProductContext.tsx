@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Product, Category } from '../types';
-import { INITIAL_PRODUCTS, INITIAL_CATEGORIES } from '../services/mockData';
+import { PRODUCTS_CATALOG_100, CATEGORIES_100 } from '../services/productsCatalog100';
 
 interface ProductContextType {
   products: Product[];
@@ -8,22 +8,27 @@ interface ProductContextType {
   addProduct: (productData: Partial<Product>) => void;
   updateProduct: (id: string, productData: Partial<Product>) => void;
   deleteProduct: (id: string) => void;
+  resetToCatalog100: () => void;
 }
 
 const ProductContext = createContext<ProductContextType | undefined>(undefined);
 
 export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [categories] = useState<Category[]>(INITIAL_CATEGORIES);
+  const [categories] = useState<Category[]>(CATEGORIES_100);
   const [products, setProducts] = useState<Product[]>(() => {
     const saved = localStorage.getItem('coffee_pos_products_catalog');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Automatically upgrade to 100-item full catalog if saved catalog has fewer than 80 items
+        if (Array.isArray(parsed) && parsed.length >= 80) {
+          return parsed;
+        }
       } catch (e) {
-        return INITIAL_PRODUCTS;
+        return PRODUCTS_CATALOG_100;
       }
     }
-    return INITIAL_PRODUCTS;
+    return PRODUCTS_CATALOG_100;
   });
 
   useEffect(() => {
@@ -67,8 +72,22 @@ export const ProductProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setProducts((prev) => prev.filter((p) => p.id !== id));
   };
 
+  const resetToCatalog100 = () => {
+    setProducts(PRODUCTS_CATALOG_100);
+    localStorage.setItem('coffee_pos_products_catalog', JSON.stringify(PRODUCTS_CATALOG_100));
+  };
+
   return (
-    <ProductContext.Provider value={{ products, categories, addProduct, updateProduct, deleteProduct }}>
+    <ProductContext.Provider
+      value={{
+        products,
+        categories,
+        addProduct,
+        updateProduct,
+        deleteProduct,
+        resetToCatalog100,
+      }}
+    >
       {children}
     </ProductContext.Provider>
   );

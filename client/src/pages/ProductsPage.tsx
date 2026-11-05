@@ -6,7 +6,7 @@ import { ProductFormModal } from '../components/products/ProductFormModal';
 import { RecipeModal } from '../components/products/RecipeModal';
 
 export const ProductsPage: React.FC = () => {
-  const { products, categories, addProduct, updateProduct, deleteProduct } = useProducts();
+  const { products, categories, addProduct, updateProduct, deleteProduct, resetToCatalog100 } = useProducts();
   const [selectedCategory, setSelectedCategory] = useState<string>('cat-1');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -48,7 +48,12 @@ export const ProductsPage: React.FC = () => {
             <Coffee className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-stone-100">Product & Drink Catalog</h2>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-xl font-bold text-stone-100">Product & Drink Catalog</h2>
+              <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/70 border border-amber-900/50 px-2 py-0.5 rounded-full">
+                {products.length} Items Available
+              </span>
+            </div>
             <p className="text-xs text-stone-400">Manage coffee beverages, bakery items, pricing, variants & live POS synchronization</p>
           </div>
         </div>
@@ -64,6 +69,20 @@ export const ProductsPage: React.FC = () => {
               className="pl-9 pr-4 py-2 rounded-xl glass-input text-stone-100 text-xs w-64 focus:outline-none"
             />
           </div>
+
+          <button
+            onClick={() => {
+              if (confirm('Reload the full official 100-item artisan coffee & bakery catalog?')) {
+                resetToCatalog100();
+                alert('Successfully loaded 100 items into POS Catalog!');
+              }
+            }}
+            className="px-3 py-2 rounded-xl bg-stone-900 border border-amber-600/40 text-amber-300 hover:bg-stone-800 font-bold text-xs flex items-center space-x-1.5 transition-colors"
+            title="Reload full 100 items"
+          >
+            <Layers className="w-4 h-4 text-amber-400" />
+            <span className="hidden sm:inline">Load 100 Items</span>
+          </button>
 
           <button
             onClick={() => setShowAddModal(true)}
