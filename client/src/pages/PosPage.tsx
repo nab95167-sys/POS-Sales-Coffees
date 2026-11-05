@@ -498,67 +498,121 @@ export const PosPage: React.FC = () => {
         {/* Products Touch Grid */}
         <div className="flex-1 overflow-y-auto pr-1">
           <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredProducts.map((product) => (
-              <div
-                key={product.id}
-                className={`bg-stone-900/80 border rounded-3xl p-3 text-left flex flex-col justify-between transition-all duration-200 shadow-xl group glass-card relative ${
-                  !product.isAvailable ? 'border-red-500/50 opacity-75' : 'border-stone-800 hover:border-amber-600/60 hover:scale-[1.02]'
-                }`}
-              >
-                <button onClick={() => handleProductClick(product)} className="w-full text-left">
-                  <div className="relative h-32 rounded-2xl overflow-hidden mb-3">
-                    <img
-                      src={product.image}
-                      alt={product.name}
-                      className={`w-full h-full object-cover transition-transform duration-300 ${
-                        !product.isAvailable ? 'grayscale opacity-60' : 'group-hover:scale-105'
-                      }`}
-                    />
+            {filteredProducts.map((product) => {
+              const cartQty = cart
+                .filter((item) => item.productId === product.id)
+                .reduce((sum, item) => sum + item.quantity, 0);
 
-                    {!product.isAvailable ? (
-                      <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
-                        <span className="px-3 py-1 rounded-full bg-red-600 text-white font-extrabold text-[10px] uppercase tracking-wider shadow-lg animate-pulse">
-                          ⚠️ OUT OF STOCK
+              return (
+                <div
+                  key={product.id}
+                  className={`bg-stone-900/80 border rounded-3xl p-3 text-left flex flex-col justify-between transition-all duration-200 shadow-xl group glass-card relative ${
+                    !product.isAvailable
+                      ? 'border-red-500/50 opacity-75'
+                      : cartQty > 0
+                      ? 'border-amber-500 shadow-lg shadow-amber-950/40 ring-1 ring-amber-500/50 scale-[1.01]'
+                      : 'border-stone-800 hover:border-amber-600/60 hover:scale-[1.02]'
+                  }`}
+                >
+                  <button onClick={() => handleProductClick(product)} className="w-full text-left">
+                    <div className="relative h-32 rounded-2xl overflow-hidden mb-3">
+                      <img
+                        src={product.image}
+                        alt={product.name}
+                        className={`w-full h-full object-cover transition-transform duration-300 ${
+                          !product.isAvailable ? 'grayscale opacity-60' : 'group-hover:scale-105'
+                        }`}
+                      />
+
+                      {/* Quantity in Cart Badge */}
+                      {cartQty > 0 && (
+                        <div className="absolute top-2 left-2 z-10 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 text-stone-950 font-black text-[11px] shadow-lg shadow-amber-950/80 border border-yellow-200 flex items-center space-x-1 animate-in zoom-in-75">
+                          <span>✓ {cartQty}</span>
+                          <span className="text-[9px] font-bold">ក្នុងកន្ត្រក</span>
+                        </div>
+                      )}
+
+                      {!product.isAvailable ? (
+                        <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
+                          <span className="px-3 py-1 rounded-full bg-red-600 text-white font-extrabold text-[10px] uppercase tracking-wider shadow-lg animate-pulse">
+                            ⚠️ OUT OF STOCK
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-stone-950/80 backdrop-blur-sm border border-stone-700 text-[10px] font-bold text-amber-300">
+                          ${product.sellingPrice.toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+
+                    <h4 className="text-sm font-bold text-stone-100 line-clamp-1 group-hover:text-amber-300 transition-colors">
+                      {product.name}
+                    </h4>
+                    <p className="text-[11px] text-stone-400 line-clamp-2 mt-0.5 leading-snug">
+                      {product.description}
+                    </p>
+
+                    <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-stone-500">
+                      <span>SKU: {product.sku}</span>
+                      <span className="text-emerald-400 font-semibold">● In Stock</span>
+                    </div>
+                  </button>
+
+                  <div className="mt-3 flex items-center justify-between pt-2 border-t border-stone-800/80 text-[11px]">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setRecipeProduct(product);
+                      }}
+                      className="text-stone-500 hover:text-amber-400 font-mono text-[10px] flex items-center space-x-1"
+                      title="View Recipe & Ingredients"
+                    >
+                      <BookOpen className="w-3 h-3 text-amber-400" />
+                      <span>Recipe</span>
+                    </button>
+
+                    {cartQty > 0 ? (
+                      <div
+                        className="flex items-center space-x-1.5 bg-stone-950/90 border border-amber-500/60 rounded-xl px-2 py-0.5 shadow-sm"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetItem = cart.find((i) => i.productId === product.id);
+                            if (targetItem) updateCartQuantity(targetItem.cartItemId, -1);
+                          }}
+                          className="w-5 h-5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center font-bold text-xs"
+                          title="Deduct 1"
+                        >
+                          -
+                        </button>
+                        <span className="text-xs font-black text-amber-300 font-mono px-1">
+                          {cartQty}
                         </span>
+                        <button
+                          type="button"
+                          onClick={() => handleProductClick(product)}
+                          className="w-5 h-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 flex items-center justify-center font-bold text-xs"
+                          title="Add 1 more"
+                        >
+                          +
+                        </button>
                       </div>
                     ) : (
-                      <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-stone-950/80 backdrop-blur-sm border border-stone-700 text-[10px] font-bold text-amber-300">
-                        ${product.sellingPrice.toFixed(2)}
-                      </div>
+                      <button
+                        onClick={() => handleProductClick(product)}
+                        className={`font-bold transition-transform ${
+                          !product.isAvailable ? 'text-red-400' : 'text-amber-400 group-hover:translate-x-0.5'
+                        }`}
+                      >
+                        {!product.isAvailable ? 'Unavailable' : 'Select +'}
+                      </button>
                     )}
                   </div>
-                  <h4 className="text-sm font-bold text-stone-100 line-clamp-1 group-hover:text-amber-300 transition-colors">
-                    {product.name}
-                  </h4>
-                  <p className="text-[11px] text-stone-400 line-clamp-2 mt-0.5 leading-snug">
-                    {product.description}
-                  </p>
-                </button>
-
-                <div className="mt-3 flex items-center justify-between pt-2 border-t border-stone-800/80 text-[11px]">
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRecipeProduct(product);
-                    }}
-                    className="text-stone-500 hover:text-amber-400 font-mono text-[10px] flex items-center space-x-1"
-                    title="View Recipe & Ingredients"
-                  >
-                    <BookOpen className="w-3 h-3 text-amber-400" />
-                    <span>Recipe</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleProductClick(product)}
-                    className={`font-bold transition-transform ${
-                      !product.isAvailable ? 'text-red-400' : 'text-amber-400 group-hover:translate-x-0.5'
-                    }`}
-                  >
-                    {!product.isAvailable ? 'Unavailable' : 'Select +'}
-                  </button>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
