@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Search, ShoppingCart, Trash2, Plus, Minus, Tag, DollarSign, 
   CreditCard, ArrowRightLeft, PauseCircle, PlayCircle, Coffee, Check, Barcode, 
-  Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu
+  Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu, CheckCircle2
 } from 'lucide-react';
 import { Product, CartItem, Order, OrderType, PaymentMethod, Category } from '../types';
 import { VariantToppingModal } from '../components/pos/VariantToppingModal';
@@ -36,6 +36,7 @@ export const PosPage: React.FC = () => {
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [couponCode, setCouponCode] = useState<string>('');
   const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
+  const [lastScannedItem, setLastScannedItem] = useState<string | null>(null);
 
   // Modals State
   const [customizeProduct, setCustomizeProduct] = useState<Product | null>(null);
@@ -81,6 +82,55 @@ export const PosPage: React.FC = () => {
       addToCart(item);
     }
   };
+
+  // Global USB Barcode Scanner Hardware Listener (Keyboard wedge)
+  useEffect(() => {
+    let barcodeBuffer = '';
+    let lastKeyTime = Date.now();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't intercept if user is intentionally typing into input or textarea
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        return;
+      }
+
+      const currentTime = Date.now();
+      const timeDiff = currentTime - lastKeyTime;
+      lastKeyTime = currentTime;
+
+      // Reset buffer if time between keystrokes exceeds 150ms (human typing vs hardware gun)
+      if (timeDiff > 150) {
+        barcodeBuffer = '';
+      }
+
+      if (e.key === 'Enter') {
+        if (barcodeBuffer.trim().length >= 3) {
+          const scannedCode = barcodeBuffer.trim();
+          const matched = products.find(
+            (p) =>
+              p.barcode.toLowerCase() === scannedCode.toLowerCase() ||
+              p.sku.toLowerCase() === scannedCode.toLowerCase()
+          );
+
+          if (matched) {
+            handleProductClick(matched);
+            soundEffects.playBeep();
+            setLastScannedItem(`${matched.name} (${scannedCode})`);
+            setTimeout(() => setLastScannedItem(null), 3500);
+          } else {
+            alert(`⚠️ Barcode / SKU "${scannedCode}" not found in current catalog.`);
+          }
+          barcodeBuffer = '';
+        }
+      } else if (e.key.length === 1) {
+        barcodeBuffer += e.key;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [products]);
 
   const addToCart = (item: CartItem) => {
     soundEffects.playBeep();
@@ -309,9 +359,26 @@ export const PosPage: React.FC = () => {
             )}
           </button>
 
+          <div
+            className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-2xl bg-stone-900/90 border border-emerald-500/40 text-emerald-400 text-xs font-mono font-bold"
+            title="Hardware USB Barcode Scanner is listening globally. Scan any SKU or Barcode directly!"
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="hidden md:inline">Scanner Active</span>
+          </div>
+
           <button
-            onClick={() => setSearchQuery('8850012301')}
+            onClick={() => {
+              const testProduct = products[0];
+              if (testProduct) {
+                handleProductClick(testProduct);
+                soundEffects.playBeep();
+                setLastScannedItem(`${testProduct.name} (${testProduct.barcode})`);
+                setTimeout(() => setLastScannedItem(null), 3500);
+              }
+            }}
             className="px-4 py-2.5 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-600/50 text-stone-300 text-xs font-bold flex items-center space-x-2 transition-colors"
+            title="Click to test barcode scan trigger"
           >
             <Barcode className="w-4 h-4 text-amber-400" />
             <span className="hidden sm:inline">{t('scanSku')}</span>
@@ -688,6 +755,17 @@ export const PosPage: React.FC = () => {
           order={completedReceiptOrder}
           onClose={() => setCompletedReceiptOrder(null)}
         />
+      )}
+
+      {/* Floating Hardware Barcode Scan Toast */}
+      {lastScannedItem && (
+        <div className="fixed bottom-6 left-6 z-50 bg-emerald-950/95 border border-emerald-500 text-emerald-200 px-5 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 animate-in fade-in slide-in-from-bottom-4 duration-300">
+          <Barcode className="w-5 h-5 text-emerald-400 animate-pulse" />
+          <div>
+            <p className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider">USB Barcode Scanned</p>
+            <p className="text-xs font-bold text-white">{lastScannedItem}</p>
+          </div>
+        </div>
       )}
     </div>
   );

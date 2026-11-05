@@ -60,7 +60,7 @@ export const ThermalReceiptModal: React.FC<Props> = ({ order, onClose }) => {
         {/* 80mm Khmer Thermal Receipt View */}
         <div className="p-6 bg-stone-950 max-h-[70vh] overflow-y-auto">
           <div
-            id="printable-receipt"
+            id="thermal-receipt"
             className="bg-white text-stone-900 p-6 rounded-2xl shadow-xl font-sans text-xs space-y-4 max-w-[320px] mx-auto border border-stone-300"
           >
             {/* Store Khmer Header */}
