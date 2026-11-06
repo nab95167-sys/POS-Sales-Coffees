@@ -3,7 +3,7 @@ import {
   Search, ShoppingCart, Trash2, Plus, Minus, Tag, DollarSign, 
   CreditCard, ArrowRightLeft, PauseCircle, PlayCircle, Coffee, Check, Barcode, 
   Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu, CheckCircle2,
-  ShieldCheck, KeyRound, ShieldAlert, FileText, Ban
+  ShieldCheck, KeyRound, ShieldAlert, FileText, Ban, FileSpreadsheet, Wallet, Megaphone
 } from 'lucide-react';
 import { Product, CartItem, Order, OrderType, PaymentMethod, Category } from '../types';
 import { VariantToppingModal } from '../components/pos/VariantToppingModal';
@@ -20,6 +20,11 @@ import { AiBaristaModal } from '../components/analytics/AiBaristaModal';
 import { ManagerPinModal } from '../components/pos/ManagerPinModal';
 import { PosScreenLockModal } from '../components/pos/PosScreenLockModal';
 import { SecurityAuditModal } from '../components/pos/SecurityAuditModal';
+import { ZReportModal } from '../components/pos/ZReportModal';
+import { PettyCashModal } from '../components/finance/PettyCashModal';
+import { PromotionManagerModal } from '../components/promotions/PromotionManagerModal';
+import { BroadcastModal } from '../components/ui/BroadcastModal';
+import { BroadcastBanner } from '../components/ui/BroadcastBanner';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useProducts } from '../context/ProductContext';
@@ -66,6 +71,10 @@ export const PosPage: React.FC = () => {
   const [showGiftCardWalletModal, setShowGiftCardWalletModal] = useState(false);
   const [showAiBaristaModal, setShowAiBaristaModal] = useState(false);
   const [showDiscountInput, setShowDiscountInput] = useState(false);
+  const [showZReportModal, setShowZReportModal] = useState(false);
+  const [showPettyCashModal, setShowPettyCashModal] = useState(false);
+  const [showPromotionModal, setShowPromotionModal] = useState(false);
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
 
   // Filter Products
   const filteredProducts = products.filter((p) => {
@@ -364,6 +373,42 @@ export const PosPage: React.FC = () => {
 
           <div className="flex items-center space-x-2">
             <button
+              onClick={() => setShowZReportModal(true)}
+              className="px-3 py-2 rounded-2xl bg-amber-950/60 border border-amber-600/50 hover:bg-amber-900/60 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-sm"
+              title="End-of-Day Z-Report Closeout (បិទបញ្ជីប្រចាំថ្ងៃ)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">Z-Report</span>
+            </button>
+
+            <button
+              onClick={() => setShowPettyCashModal(true)}
+              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-emerald-500/50 text-emerald-400 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              title="Petty Cash Daily Out-of-Pocket Expenses (កត់ចំណាយហាង)"
+            >
+              <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden xl:inline">Petty Cash</span>
+            </button>
+
+            <button
+              onClick={() => setShowPromotionModal(true)}
+              className="px-3 py-2 rounded-2xl bg-purple-950/40 border border-purple-600/40 text-purple-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              title="Automated Promotions & Happy Hour Engine (កម្មវិធីបញ្ចុះតម្លៃ)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden xl:inline">Promos</span>
+            </button>
+
+            <button
+              onClick={() => setShowBroadcastModal(true)}
+              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-blue-500/50 text-blue-400 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              title="Store Broadcast Notice Banner (ផ្សាយដំណឹង)"
+            >
+              <Megaphone className="w-3.5 h-3.5 text-blue-400" />
+              <span className="hidden xl:inline">Notice</span>
+            </button>
+
+            <button
               onClick={() => {
                 logSecurityEvent(
                   'SCREEN_LOCK',
@@ -442,6 +487,9 @@ export const PosPage: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {/* Store Broadcast Notice Banner */}
+        <BroadcastBanner onOpenManager={() => setShowBroadcastModal(true)} />
 
         {/* Search Bar & Hold Order Barcode Simulator */}
         <div className="flex items-center space-x-3 flex-shrink-0">
@@ -761,13 +809,23 @@ export const PosPage: React.FC = () => {
         <div className="pt-4 border-t border-stone-800/80 space-y-3 flex-shrink-0">
           {/* Coupon Code & Split Bill Bar */}
           <div className="flex items-center justify-between text-xs">
-            <button
-              onClick={() => setShowDiscountInput(!showDiscountInput)}
-              className="text-amber-400 hover:underline flex items-center space-x-1"
-            >
-              <Tag className="w-3.5 h-3.5" />
-              <span>{discountPercent > 0 ? `${discountPercent}% ${t('discount')}` : 'Promo Code'}</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowPromotionModal(true)}
+                className="text-amber-400 hover:text-amber-300 font-semibold flex items-center space-x-1"
+                title="Open Promotions & Happy Hour Engine"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                <span>{discountPercent > 0 ? `${discountPercent}% ${t('discount')}` : '🎁 Promos & Deals'}</span>
+              </button>
+              <span className="text-stone-600">•</span>
+              <button
+                onClick={() => setShowDiscountInput(!showDiscountInput)}
+                className="text-stone-400 hover:text-stone-300 hover:underline text-[11px]"
+              >
+                Code
+              </button>
+            </div>
 
             {cart.length > 0 && (
               <button
@@ -993,6 +1051,42 @@ export const PosPage: React.FC = () => {
       {showSecurityAuditModal && (
         <SecurityAuditModal
           onClose={() => setShowSecurityAuditModal(false)}
+        />
+      )}
+
+      {/* End-of-Day Z-Report Closeout Modal */}
+      {showZReportModal && (
+        <ZReportModal
+          onClose={() => setShowZReportModal(false)}
+          cashierName={user?.name || 'Cashier'}
+        />
+      )}
+
+      {/* Petty Cash Out-of-Pocket Expense Modal */}
+      {showPettyCashModal && (
+        <PettyCashModal
+          onClose={() => setShowPettyCashModal(false)}
+          cashierName={user?.name || 'Cashier'}
+        />
+      )}
+
+      {/* Automated Promotions & Happy Hour Engine Modal */}
+      {showPromotionModal && (
+        <PromotionManagerModal
+          onClose={() => setShowPromotionModal(false)}
+          onApplyToCart={(promo) => {
+            setDiscountPercent(promo.value);
+            soundEffects.playSuccess();
+            alert(`បានអនុវត្តប្រូម៉ូសិន: ${promo.nameKh} (${promo.value}% OFF)`);
+          }}
+        />
+      )}
+
+      {/* Store Broadcast Notice Modal */}
+      {showBroadcastModal && (
+        <BroadcastModal
+          onClose={() => setShowBroadcastModal(false)}
+          authorName={user?.name || 'Cashier'}
         />
       )}
 

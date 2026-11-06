@@ -61,6 +61,33 @@ class SoundEffects {
       // Audio context suppressed
     }
   }
+
+  // Melodic chime on success / approval
+  playSuccess() {
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, this.ctx.currentTime); // C5
+      osc.frequency.setValueAtTime(659.25, this.ctx.currentTime + 0.08); // E5
+      osc.frequency.setValueAtTime(783.99, this.ctx.currentTime + 0.16); // G5
+      osc.frequency.setValueAtTime(1046.50, this.ctx.currentTime + 0.24); // C6
+
+      gain.gain.setValueAtTime(0.1, this.ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.4);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start();
+      osc.stop(this.ctx.currentTime + 0.4);
+    } catch (e) {
+      // Audio context suppressed
+    }
+  }
 }
 
 export const soundEffects = new SoundEffects();
