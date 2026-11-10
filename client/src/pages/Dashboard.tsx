@@ -12,8 +12,10 @@ import {
 } from 'recharts';
 import { SALES_ANALYTICS_DATA, INITIAL_INGREDIENTS } from '../services/mockData';
 import { getTotalExpensesToday } from '../services/expenseService';
+import { getTodaySalesMetrics } from '../services/orderService';
 import { useAuth } from '../context/AuthContext';
 import { ZReportModal } from '../components/pos/ZReportModal';
+import { XReportModal } from '../components/pos/XReportModal';
 import { PettyCashModal } from '../components/finance/PettyCashModal';
 import { PromotionManagerModal } from '../components/promotions/PromotionManagerModal';
 import { BroadcastModal } from '../components/ui/BroadcastModal';
@@ -25,16 +27,19 @@ export const Dashboard: React.FC = () => {
 
   // Modals state
   const [showZReport, setShowZReport] = useState(false);
+  const [showXReport, setShowXReport] = useState(false);
   const [showPettyCash, setShowPettyCash] = useState(false);
   const [showPromoManager, setShowPromoManager] = useState(false);
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
 
-  // Financial reconciliation numbers
+  // Dynamic Financial reconciliation numbers from actual orders
+  const metrics = getTodaySalesMetrics();
   const dailyTarget = 1500.00;
-  const currentSales = 1248.50;
+  const currentSales = metrics.netSales > 0 ? metrics.netSales : 1248.50;
   const targetPercent = Math.min(100, Math.round((currentSales / dailyTarget) * 100));
 
-  const cashSales = 485.00;
+  const cashSales = metrics.cashSales > 0 ? metrics.cashSales : 485.00;
+  const cashlessSales = metrics.cashlessSales > 0 ? metrics.cashlessSales : 763.00;
   const pettyExpenses = getTotalExpensesToday();
   const openingFloat = 100.00;
   const netDrawerCash = openingFloat + cashSales - pettyExpenses;
@@ -305,6 +310,13 @@ export const Dashboard: React.FC = () => {
         <ZReportModal
           onClose={() => setShowZReport(false)}
           cashierName={user?.name || 'Store Owner'}
+        />
+      )}
+
+      {showXReport && (
+        <XReportModal
+          onClose={() => setShowXReport(false)}
+          outgoingCashier={user?.name || 'Store Owner'}
         />
       )}
 

@@ -12,6 +12,28 @@ export const KdsBoard: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<'ALL' | OrderStatus>('ALL');
 
   useEffect(() => {
+    const loadFromStorage = () => {
+      const saved = localStorage.getItem('coffee_kds_orders');
+      if (saved) {
+        try {
+          setOrders(JSON.parse(saved));
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    };
+
+    window.addEventListener('coffee_order_created', loadFromStorage);
+    window.addEventListener('coffee_order_refunded', loadFromStorage);
+    window.addEventListener('storage', loadFromStorage);
+    return () => {
+      window.removeEventListener('coffee_order_created', loadFromStorage);
+      window.removeEventListener('coffee_order_refunded', loadFromStorage);
+      window.removeEventListener('storage', loadFromStorage);
+    };
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem('coffee_kds_orders', JSON.stringify(orders));
   }, [orders]);
 

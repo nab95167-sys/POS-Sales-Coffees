@@ -5,6 +5,7 @@ export const sanitizeInput = (req: Request, res: Response, next: NextFunction) =
   if (req.body) {
     req.body = sanitizeObject(req.body);
   }
+  
   if (req.query) {
     req.query = sanitizeObject(req.query);
   }

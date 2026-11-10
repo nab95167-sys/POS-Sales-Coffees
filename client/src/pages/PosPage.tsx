@@ -3,9 +3,10 @@ import {
   Search, ShoppingCart, Trash2, Plus, Minus, Tag, DollarSign, 
   CreditCard, ArrowRightLeft, PauseCircle, PlayCircle, Coffee, Check, Barcode, 
   Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu, CheckCircle2,
-  ShieldCheck, KeyRound, ShieldAlert, FileText, Ban, FileSpreadsheet, Wallet, Megaphone
+  ShieldCheck, KeyRound, ShieldAlert, FileText, Ban, FileSpreadsheet, Wallet, Megaphone,
+  History, Layers
 } from 'lucide-react';
-import { Product, CartItem, Order, OrderType, PaymentMethod, Category } from '../types';
+import { Product, CartItem, Order, OrderType, PaymentMethod, Category, DiningTable, SplitPayment } from '../types';
 import { VariantToppingModal } from '../components/pos/VariantToppingModal';
 import { PaymentModal } from '../components/pos/PaymentModal';
 import { ThermalReceiptModal } from '../components/pos/ThermalReceiptModal';
@@ -21,6 +22,10 @@ import { ManagerPinModal } from '../components/pos/ManagerPinModal';
 import { PosScreenLockModal } from '../components/pos/PosScreenLockModal';
 import { SecurityAuditModal } from '../components/pos/SecurityAuditModal';
 import { ZReportModal } from '../components/pos/ZReportModal';
+import { XReportModal } from '../components/pos/XReportModal';
+import { CupLabelModal } from '../components/pos/CupLabelModal';
+import { OrderHistoryModal } from '../components/pos/OrderHistoryModal';
+import { TablePickerModal } from '../components/tables/TablePickerModal';
 import { PettyCashModal } from '../components/finance/PettyCashModal';
 import { PromotionManagerModal } from '../components/promotions/PromotionManagerModal';
 import { BroadcastModal } from '../components/ui/BroadcastModal';
@@ -28,6 +33,7 @@ import { BroadcastBanner } from '../components/ui/BroadcastBanner';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useProducts } from '../context/ProductContext';
+import { saveOrder } from '../services/orderService';
 import { sendTelegramSaleAlert } from '../services/telegramBotService';
 import { soundEffects } from '../services/soundService';
 import { logSecurityEvent } from '../services/securityAuditService';
@@ -56,6 +62,13 @@ export const PosPage: React.FC = () => {
     details: string;
     onApproved: () => void;
   } | null>(null);
+
+  // Table & Handover & Orders State
+  const [selectedTable, setSelectedTable] = useState<DiningTable | null>(null);
+  const [showTablePickerModal, setShowTablePickerModal] = useState(false);
+  const [showOrderHistoryModal, setShowOrderHistoryModal] = useState(false);
+  const [showXReportModal, setShowXReportModal] = useState(false);
+  const [cupLabelOrder, setCupLabelOrder] = useState<Order | null>(null);
 
   // Modals State
   const [customizeProduct, setCustomizeProduct] = useState<Product | null>(null);
@@ -305,6 +318,8 @@ export const PosPage: React.FC = () => {
       orderNumber: `ORD-${Math.floor(1000 + Math.random() * 9000)}`,
       type: orderType,
       status: 'PENDING',
+      tableId: selectedTable?.id,
+      tableName: selectedTable?.name,
       cashierName: user?.name || 'Cashier',
       items: cart,
       subtotal,
@@ -323,7 +338,8 @@ export const PosPage: React.FC = () => {
     method: PaymentMethod,
     amountPaid: number,
     changeAmount: number,
-    transactionId?: string
+    transactionId?: string,
+    splitPayments?: SplitPayment[]
   ) => {
     if (!activePaymentOrder) return;
 
@@ -332,16 +348,19 @@ export const PosPage: React.FC = () => {
       paymentMethod: method,
       amountPaid,
       changeAmount,
+      splitPayments,
       status: 'PREPARING',
     };
 
     soundEffects.playCashRegister();
+    saveOrder(finalizedOrder); // Live order sync to KDS, table occupation, inventory deduction & order history!
     sendTelegramSaleAlert(finalizedOrder);
 
     setActivePaymentOrder(null);
     setCart([]);
     setDiscountPercent(0);
     setCouponCode('');
+    setSelectedTable(null);
     setCompletedReceiptOrder(finalizedOrder);
   };
 
@@ -373,8 +392,26 @@ export const PosPage: React.FC = () => {
 
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setShowZReportModal(true)}
+              onClick={() => setShowOrderHistoryModal(true)}
               className="px-3 py-2 rounded-2xl bg-amber-950/60 border border-amber-600/50 hover:bg-amber-900/60 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-sm"
+              title="Order History, Re-print Receipt & Refunds (ប្រវត្តិវិក្កយបត្រ)"
+            >
+              <History className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">Orders</span>
+            </button>
+
+            <button
+              onClick={() => setShowXReportModal(true)}
+              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-500 text-stone-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              title="Shift Handover Report (របាយការណ៍ប្តូរវេន X-Report)"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">X-Report</span>
+            </button>
+
+            <button
+              onClick={() => setShowZReportModal(true)}
+              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-600/50 text-stone-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
               title="End-of-Day Z-Report Closeout (បិទបញ្ជីប្រចាំថ្ងៃ)"
             >
               <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
@@ -708,6 +745,23 @@ export const PosPage: React.FC = () => {
               </button>
             ))}
           </div>
+
+          {/* Dine-In Table Picker Pill */}
+          {orderType === 'DINE_IN' && (
+            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-amber-950/40 border border-amber-600/40 text-xs shadow-sm">
+              <span className="flex items-center space-x-1.5 text-stone-300 font-semibold">
+                <Layers className="w-4 h-4 text-amber-400" />
+                <span>តុអង្គុយ (Table):</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowTablePickerModal(true)}
+                className="px-3 py-1 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs shadow flex items-center space-x-1 transition-all"
+              >
+                <span>{selectedTable ? `${selectedTable.name} (${selectedTable.tableNumber})` : '+ ជ្រើសរើសលេខតុ'}</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Cart Item Stream */}
@@ -1021,6 +1075,7 @@ export const PosPage: React.FC = () => {
         <ThermalReceiptModal
           order={completedReceiptOrder}
           onClose={() => setCompletedReceiptOrder(null)}
+          onPrintCupLabels={() => setCupLabelOrder(completedReceiptOrder)}
         />
       )}
 
@@ -1087,6 +1142,47 @@ export const PosPage: React.FC = () => {
         <BroadcastModal
           onClose={() => setShowBroadcastModal(false)}
           authorName={user?.name || 'Cashier'}
+        />
+      )}
+
+      {/* Dine-In Table Picker Modal */}
+      {showTablePickerModal && (
+        <TablePickerModal
+          selectedTable={selectedTable}
+          onSelectTable={(table) => setSelectedTable(table)}
+          onClose={() => setShowTablePickerModal(false)}
+        />
+      )}
+
+      {/* Order History, Re-print Receipt & Refunds Modal */}
+      {showOrderHistoryModal && (
+        <OrderHistoryModal
+          onClose={() => setShowOrderHistoryModal(false)}
+          onReprintReceipt={(order) => {
+            setCompletedReceiptOrder(order);
+          }}
+          onPrintCupLabels={(order) => {
+            setCupLabelOrder(order);
+          }}
+          onRequestManagerPin={(action) => {
+            setManagerPinAction(action);
+          }}
+        />
+      )}
+
+      {/* Mid-Day Shift Handover X-Report Modal */}
+      {showXReportModal && (
+        <XReportModal
+          outgoingCashier={user?.name || 'Cashier'}
+          onClose={() => setShowXReportModal(false)}
+        />
+      )}
+
+      {/* Cup Sticker Label Printer Modal (40x30mm) */}
+      {cupLabelOrder && (
+        <CupLabelModal
+          order={cupLabelOrder}
+          onClose={() => setCupLabelOrder(null)}
         />
       )}
 

@@ -1,7 +1,7 @@
 export interface SecurityAuditEvent {
   id: string;
   timestamp: string;
-  action: 'DRAWER_KICK' | 'CART_VOID' | 'DISCOUNT_OVERRIDE' | 'SCREEN_LOCK' | 'SCREEN_UNLOCK' | 'ITEM_DELETE';
+  action: 'DRAWER_KICK' | 'CART_VOID' | 'DISCOUNT_OVERRIDE' | 'SCREEN_LOCK' | 'SCREEN_UNLOCK' | 'ITEM_DELETE' | 'ORDER_REFUND' | 'ORDER_VOID';
   title: string;
   details: string;
   performedBy: string;

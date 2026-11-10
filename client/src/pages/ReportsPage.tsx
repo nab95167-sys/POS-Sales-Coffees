@@ -8,10 +8,22 @@ import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, 
   XAxis, YAxis, Tooltip, CartesianGrid, Legend 
 } from 'recharts';
+import { getOrders } from '../services/orderService';
 
 export const ReportsPage: React.FC = () => {
   const [dateRange, setDateRange] = useState<'Today' | 'Weekly' | 'Monthly' | 'Yearly'>('Weekly');
   const [activeTab, setActiveTab] = useState<'Overview' | 'Products' | 'Payments' | 'Ledger'>('Overview');
+
+  const liveOrders = getOrders();
+  const salesLedgerLogs = liveOrders.map((o) => ({
+    id: o.orderNumber,
+    date: new Date(o.createdAt).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
+    cashier: o.cashierName,
+    items: o.items.length,
+    method: o.paymentMethod ? o.paymentMethod.replace('_', ' ') : 'Cash',
+    total: o.totalAmount,
+    status: o.isRefunded ? 'Refunded' : o.status,
+  }));
 
   // Revenue & Profit Trend Data
   const financialTrendData = [
@@ -39,15 +51,6 @@ export const ReportsPage: React.FC = () => {
     { name: 'Cash (USD)', value: 4210, color: '#10b981' },
     { name: 'Credit Card', value: 2140, color: '#3b82f6' },
     { name: 'Bakong / Wing', value: 1062, color: '#f59e0b' },
-  ];
-
-  // Sales Ledger Logs
-  const salesLedgerLogs = [
-    { id: 'ORD-8824', date: '2026-08-05 14:32', cashier: 'Sokha Ly', items: 3, method: 'ABA KHQR', total: 15.34, status: 'Completed' },
-    { id: 'ORD-8823', date: '2026-08-05 14:15', cashier: 'Sokha Ly', items: 1, method: 'Cash', total: 4.25, status: 'Completed' },
-    { id: 'ORD-8822', date: '2026-08-05 13:58', cashier: 'Alex Wright', items: 4, method: 'Credit Card', total: 22.80, status: 'Completed' },
-    { id: 'ORD-8821', date: '2026-08-05 13:40', cashier: 'Sokha Ly', items: 2, method: 'Bakong', total: 9.75, status: 'Completed' },
-    { id: 'ORD-8820', date: '2026-08-05 13:12', cashier: 'Alex Wright', items: 5, method: 'ABA KHQR', total: 28.50, status: 'Completed' },
   ];
 
   // Export CSV

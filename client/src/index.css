@@ -55,7 +55,7 @@
   background: rgba(245, 158, 11, 0.95);
 }
 
-/* Print thermal receipt styling */
+/* Print thermal receipt & cup sticker labels styling */
 @media print {
   @page {
     margin: 0;
@@ -69,7 +69,8 @@
     visibility: hidden;
   }
   #thermal-receipt, #thermal-receipt *,
-  #printable-receipt, #printable-receipt * {
+  #printable-receipt, #printable-receipt *,
+  #cup-sticker-labels, #cup-sticker-labels * {
     visibility: visible;
   }
   #thermal-receipt, #printable-receipt {
@@ -84,5 +85,19 @@
     color: black !important;
     box-shadow: none !important;
     border: none !important;
+  }
+  #cup-sticker-labels {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    display: block !important;
+  }
+  .cup-label-print-unit {
+    page-break-after: always;
+    break-after: page;
+    width: 50mm !important;
+    margin: 2mm 0;
+    border: 1px solid black !important;
   }
 }

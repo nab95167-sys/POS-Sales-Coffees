@@ -1,14 +1,15 @@
 import React from 'react';
-import { X, Printer, CheckCircle2 } from 'lucide-react';
+import { X, Printer, CheckCircle2, Tag } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Order } from '../../types';
 
 interface Props {
   order: Order;
   onClose: () => void;
+  onPrintCupLabels?: () => void;
 }
 
-export const ThermalReceiptModal: React.FC<Props> = ({ order, onClose }) => {
+export const ThermalReceiptModal: React.FC<Props> = ({ order, onClose, onPrintCupLabels }) => {
   const handlePrint = () => {
     window.print();
   };
@@ -95,6 +96,12 @@ export const ThermalReceiptModal: React.FC<Props> = ({ order, onClose }) => {
                 <span>ប្រភេទ (Type):</span>
                 <span className="font-bold">{getOrderTypeKhmer(order.type)}</span>
               </div>
+              {order.tableName && (
+                <div className="flex justify-between font-bold text-amber-900">
+                  <span>លេខតុ (Table):</span>
+                  <span>{order.tableName}</span>
+                </div>
+              )}
             </div>
 
             {/* Items Khmer Table */}
@@ -162,8 +169,18 @@ export const ThermalReceiptModal: React.FC<Props> = ({ order, onClose }) => {
             <div className="border-t border-dashed border-stone-400 pt-2 text-[10px] space-y-0.5">
               <div className="flex justify-between">
                 <span>វិធីសាស្ត្រទូទាត់ (Payment):</span>
-                <span className="font-bold">{getPaymentMethodKhmer(order.paymentMethod)}</span>
+                <span className="font-bold">{order.splitPayments && order.splitPayments.length > 0 ? 'បង់ចម្រុះ (Split Payment)' : getPaymentMethodKhmer(order.paymentMethod)}</span>
               </div>
+              {order.splitPayments && order.splitPayments.length > 0 && (
+                <div className="pl-2 text-[9px] text-stone-700 space-y-0.5">
+                  {order.splitPayments.map((sp, idx) => (
+                    <div key={idx} className="flex justify-between">
+                      <span>• {sp.method === 'CASH' ? 'ប្រាក់សុទ្ធ (Cash)' : sp.method.replace('_', ' ')}:</span>
+                      <span className="font-mono font-bold">${sp.amount.toFixed(2)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {order.amountPaid !== undefined && (
                 <div className="flex justify-between">
                   <span>ប្រាក់ទទួលបាន (Received):</span>
@@ -201,13 +218,26 @@ export const ThermalReceiptModal: React.FC<Props> = ({ order, onClose }) => {
             បិទ (Close)
           </button>
 
-          <button
-            onClick={handlePrint}
-            className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-2 shadow-lg shadow-amber-900/30"
-          >
-            <Printer className="w-4 h-4" />
-            <span>បោះពុម្ពវិក្កយបត្រ 80mm</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            {onPrintCupLabels && (
+              <button
+                onClick={onPrintCupLabels}
+                className="px-3.5 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-amber-300 border border-amber-600/40 font-bold text-xs flex items-center space-x-1.5 transition-colors"
+                title="Print 40x30mm Cup Stickers for Barista"
+              >
+                <Tag className="w-3.5 h-3.5 text-amber-400" />
+                <span>Sticker កែវ</span>
+              </button>
+            )}
+
+            <button
+              onClick={handlePrint}
+              className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-2 shadow-lg shadow-amber-900/30"
+            >
+              <Printer className="w-4 h-4" />
+              <span>បោះពុម្ពវិក្កយបត្រ 80mm</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

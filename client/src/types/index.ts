@@ -76,6 +76,11 @@ export type OrderType = 'DINE_IN' | 'TAKE_AWAY' | 'DELIVERY' | 'DRIVE_THROUGH';
 export type OrderStatus = 'PENDING' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
 export type PaymentMethod = 'CASH' | 'CREDIT_CARD' | 'ABA_KHQR' | 'BAKONG' | 'WING' | 'ACLEDA' | 'MIXED';
 
+export interface SplitPayment {
+  method: PaymentMethod;
+  amount: number;
+}
+
 export interface Order {
   id: string;
   orderNumber: string;
@@ -94,10 +99,15 @@ export interface Order {
   serviceCharge: number;
   totalAmount: number;
   paymentMethod?: PaymentMethod;
+  splitPayments?: SplitPayment[];
   amountPaid?: number;
   changeAmount?: number;
   createdAt: string;
   notes?: string;
+  isRefunded?: boolean;
+  refundReason?: string;
+  refundedAt?: string;
+  refundedBy?: string;
 }
 
 export type TableStatus = 'AVAILABLE' | 'OCCUPIED' | 'RESERVED' | 'DIRTY';
