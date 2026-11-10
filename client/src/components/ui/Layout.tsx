@@ -56,23 +56,23 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
   };
 
   return (
-    <div className="flex h-screen bg-stone-950 text-stone-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-[#09090b] text-zinc-100 overflow-hidden font-sans">
       {/* Sidebar */}
-      <aside className="w-64 bg-stone-900/90 border-r border-amber-900/20 flex flex-col justify-between p-4 z-20 glass-panel">
+      <aside className="w-64 bg-[#0d0d11]/95 border-r border-zinc-800/80 flex flex-col justify-between p-4 z-20 glass-panel">
         <div>
           {/* Brand Logo */}
           <div className="flex items-center space-x-3 px-2 py-3 mb-6">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-700 via-amber-600 to-yellow-500 flex items-center justify-center shadow-lg shadow-amber-900/40">
-              <Coffee className="w-6 h-6 text-stone-950 font-bold" />
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 via-amber-400 to-yellow-300 flex items-center justify-center shadow-lg shadow-amber-500/25 border border-amber-300/40">
+              <Coffee className="w-5 h-5 text-zinc-950 font-black" />
             </div>
             <div>
-              <h1 className="font-bold text-sm text-amber-100 tracking-wide font-sans leading-none">{t('appName')}</h1>
-              <span className="text-[9px] text-amber-500 font-medium tracking-wider block mt-0.5">{t('appSub')}</span>
+              <h1 className="font-extrabold text-sm text-zinc-100 tracking-wide font-sans leading-none">{t('appName')}</h1>
+              <span className="text-[9px] font-bold tracking-wider block mt-0.5 gold-gradient-text uppercase">{t('appSub')}</span>
             </div>
           </div>
 
           {/* Navigation Links */}
-          <nav className="space-y-1">
+          <nav className="space-y-1.5">
             {navigation.map((item) => {
               const isActive = location.pathname === item.path;
               const hasAccess = user && item.roles.includes(user.role);
@@ -84,13 +84,13 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all duration-200 ${
+                  className={`flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
                     isActive
-                      ? 'bg-amber-600/20 text-amber-400 border border-amber-500/30 shadow-md shadow-amber-900/20'
-                      : 'text-stone-400 hover:text-stone-200 hover:bg-stone-800/50'
+                      ? 'bg-gradient-to-r from-amber-500/20 via-amber-500/10 to-transparent text-amber-300 border-l-2 border-amber-500 shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/40'
                   }`}
                 >
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-amber-400' : 'text-stone-400'}`} />
+                  <Icon className={`w-4 h-4 transition-colors ${isActive ? 'text-amber-400' : 'text-zinc-400'}`} />
                   <span>{item.name}</span>
                 </Link>
               );
@@ -99,29 +99,29 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         </div>
 
         {/* User & Shift Card */}
-        <div className="pt-4 border-t border-stone-800/80 space-y-3">
+        <div className="pt-4 border-t border-zinc-800/80 space-y-3">
           {/* Quick Role Switcher */}
           <div className="relative">
             <button
               onClick={() => setShowRoleSelector(!showRoleSelector)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-amber-950/40 border border-amber-700/30 text-amber-300 text-xs font-semibold hover:bg-amber-900/40 transition-colors"
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-900/90 border border-zinc-800 hover:border-amber-500/40 text-amber-300 text-xs font-semibold transition-colors"
             >
               <span className="flex items-center space-x-1.5">
-                <Shield className="w-3.5 h-3.5" />
+                <Shield className="w-3.5 h-3.5 text-amber-400" />
                 <span>Role: {user?.role}</span>
               </span>
               <RefreshCw className="w-3 h-3 text-amber-400" />
             </button>
 
             {showRoleSelector && (
-              <div className="absolute bottom-12 left-0 right-0 bg-stone-900 border border-amber-700/40 rounded-xl p-2 shadow-2xl space-y-1 z-50">
-                <div className="text-[10px] text-stone-400 font-semibold px-2 py-1 uppercase">Switch Demo Role</div>
+              <div className="absolute bottom-12 left-0 right-0 bg-[#121217] border border-zinc-700 rounded-xl p-2 shadow-2xl space-y-1 z-50">
+                <div className="text-[10px] text-zinc-400 font-semibold px-2 py-1 uppercase border-b border-zinc-800 mb-1">Switch Demo Role</div>
                 {(['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'] as Role[]).map((r) => (
                   <button
                     key={r}
                     onClick={() => handleRoleSwitch(r)}
                     className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      user?.role === r ? 'bg-amber-600 text-stone-950 font-bold' : 'text-stone-300 hover:bg-stone-800'
+                      user?.role === r ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-300 hover:bg-zinc-800'
                     }`}
                   >
                     {r}
@@ -139,8 +139,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 className="w-9 h-9 rounded-full object-cover border border-amber-500/40"
               />
               <div className="overflow-hidden">
-                <p className="text-xs font-bold text-stone-200 truncate">{user?.name}</p>
-                <p className="text-[10px] text-stone-400 truncate">{user?.email}</p>
+                <p className="text-xs font-bold text-zinc-200 truncate">{user?.name}</p>
+                <p className="text-[10px] text-zinc-400 truncate">{user?.email}</p>
               </div>
             </div>
             <button
@@ -148,7 +148,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                 logout();
                 navigate('/login');
               }}
-              className="p-1.5 rounded-lg text-stone-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
               title="Logout"
             >
               <LogOut className="w-4 h-4" />
@@ -160,9 +160,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top App Bar */}
-        <header className="h-16 bg-stone-900/60 border-b border-stone-800/80 px-6 flex items-center justify-between glass-panel z-10">
+        <header className="h-16 bg-[#0c0c0f]/80 backdrop-blur-xl border-b border-zinc-800/80 px-6 flex items-center justify-between z-10">
           <div className="flex items-center space-x-4">
-            <h2 className="text-lg font-bold text-stone-100 tracking-wide">
+            <h2 className="text-lg font-bold text-zinc-100 tracking-wide font-sans">
               {navigation.find((n) => n.path === location.pathname)?.name || t('posScreen')}
             </h2>
 
@@ -170,7 +170,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             <div className="relative">
               <button
                 onClick={() => setShowBranchSelector(!showBranchSelector)}
-                className="flex items-center space-x-2 px-3 py-1.5 rounded-2xl bg-amber-950/40 border border-amber-600/40 text-amber-300 text-xs font-bold hover:bg-amber-900/40 transition-colors shadow-md"
+                className="flex items-center space-x-2 px-3 py-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-700/80 text-amber-300 text-xs font-bold hover:border-amber-500/50 transition-colors shadow-sm"
               >
                 <span>{activeBranch.flag}</span>
                 <span>Branch {activeBranch.code} ({activeBranch.name})</span>
@@ -178,8 +178,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </button>
 
               {showBranchSelector && (
-                <div className="absolute top-10 left-0 w-72 bg-stone-900 border border-amber-700/40 rounded-2xl p-2 shadow-2xl space-y-1 z-50 animate-in fade-in zoom-in-95">
-                  <div className="text-[10px] text-stone-400 font-semibold px-2 py-1 uppercase border-b border-stone-800">
+                <div className="absolute top-10 left-0 w-72 bg-[#121217] border border-zinc-700 rounded-2xl p-2 shadow-2xl space-y-1 z-50 animate-in fade-in zoom-in-95">
+                  <div className="text-[10px] text-zinc-400 font-semibold px-2 py-1 uppercase border-b border-zinc-800">
                     Select Worldwide Branch Network
                   </div>
                   {WORLDWIDE_BRANCHES.map((b) => (
@@ -188,8 +188,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                       onClick={() => handleBranchSelect(b)}
                       className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs text-left transition-colors ${
                         activeBranch.id === b.id
-                          ? 'bg-amber-600 text-stone-950 font-bold'
-                          : 'text-stone-200 hover:bg-stone-800'
+                          ? 'bg-amber-500 text-zinc-950 font-bold'
+                          : 'text-zinc-200 hover:bg-zinc-800'
                       }`}
                     >
                       <div className="flex items-center space-x-2">
@@ -208,21 +208,21 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </div>
 
           {/* Right Header Bar: Command Palette Launcher, Quad Language Selector & Clock */}
-          <div className="flex items-center space-x-3 text-sm text-stone-300">
+          <div className="flex items-center space-x-3 text-sm text-zinc-300">
             {/* Command Palette Ctrl+K Launcher */}
             <button
               onClick={() => setShowCommandPalette(true)}
-              className="flex items-center space-x-2 px-3 py-1.5 rounded-2xl bg-stone-950 border border-stone-800 text-stone-400 hover:text-stone-200 text-xs font-semibold shadow-inner"
+              className="flex items-center space-x-2 px-3 py-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-semibold shadow-inner"
             >
               <Search className="w-3.5 h-3.5 text-amber-400" />
               <span className="hidden lg:inline">Quick Search...</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-stone-800 text-[10px] font-mono text-stone-400 border border-stone-700">
+              <kbd className="px-1.5 py-0.5 rounded bg-zinc-800 text-[10px] font-mono text-zinc-400 border border-zinc-700">
                 Ctrl K
               </kbd>
             </button>
 
             {/* Quad Language Selector Buttons */}
-            <div className="flex items-center bg-stone-950 p-1 rounded-2xl border border-stone-800 shadow-inner">
+            <div className="flex items-center bg-zinc-900/90 p-1 rounded-2xl border border-zinc-800 shadow-inner">
               <Globe className="w-3.5 h-3.5 text-amber-400 ml-2 mr-1" />
               {(['EN', 'KH', 'TH', 'ZH'] as Language[]).map((lang) => (
                 <button
@@ -230,8 +230,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
                   onClick={() => setLanguage(lang)}
                   className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all ${
                     language === lang
-                      ? 'bg-amber-600 text-stone-950 shadow-md'
-                      : 'text-stone-400 hover:text-stone-200'
+                      ? 'bg-amber-500 text-zinc-950 shadow-md font-extrabold'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
                   {lang === 'EN' && 'EN'}
@@ -243,9 +243,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
 
             {/* Time */}
-            <div className="hidden sm:flex items-center space-x-2 bg-stone-800/50 px-3 py-1.5 rounded-xl border border-stone-700/50">
+            <div className="hidden sm:flex items-center space-x-2 bg-zinc-900/90 px-3 py-1.5 rounded-xl border border-zinc-800 text-xs">
               <Clock className="w-4 h-4 text-amber-400" />
-              <span className="font-mono text-amber-200">
+              <span className="font-mono text-amber-300 font-bold">
                 {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </span>
             </div>
@@ -254,7 +254,7 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
 
         {/* Dynamic Page Content */}
         <main
-          className={`flex-1 min-h-0 bg-gradient-to-br from-stone-950 via-stone-900 to-stone-950 ${
+          className={`flex-1 min-h-0 bg-gradient-to-br from-[#09090b] via-[#0e0e13] to-[#09090b] ${
             location.pathname === '/pos'
               ? 'p-4 overflow-hidden flex flex-col'
               : 'p-6 overflow-y-auto'

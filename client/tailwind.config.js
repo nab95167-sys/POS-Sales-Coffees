@@ -23,7 +23,8 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Inter', 'Poppins', 'sans-serif'],
+        sans: ['"Plus Jakarta Sans"', '"Kantumruy Pro"', 'Inter', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
       borderRadius: {
         '2xl': '16px',

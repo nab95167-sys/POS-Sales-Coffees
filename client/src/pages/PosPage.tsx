@@ -4,7 +4,7 @@ import {
   CreditCard, ArrowRightLeft, PauseCircle, PlayCircle, Coffee, Check, Barcode, 
   Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu, CheckCircle2,
   ShieldCheck, KeyRound, ShieldAlert, FileText, Ban, FileSpreadsheet, Wallet, Megaphone,
-  History, Layers
+  History, Layers, ChevronDown
 } from 'lucide-react';
 import { Product, CartItem, Order, OrderType, PaymentMethod, Category, DiningTable, SplitPayment } from '../types';
 import { VariantToppingModal } from '../components/pos/VariantToppingModal';
@@ -88,6 +88,8 @@ export const PosPage: React.FC = () => {
   const [showPettyCashModal, setShowPettyCashModal] = useState(false);
   const [showPromotionModal, setShowPromotionModal] = useState(false);
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
+  const [showTerminalMenu, setShowTerminalMenu] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
 
   // Filter Products
   const filteredProducts = products.filter((p) => {
@@ -368,160 +370,223 @@ export const PosPage: React.FC = () => {
     <div className="h-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 overflow-hidden font-sans">
       {/* Left Area: Product Menu & Category Sidebar (8 Columns) */}
       <div className="lg:col-span-8 flex flex-col h-full min-h-0 space-y-3 min-w-0">
-        {/* Top Control Toolbar: Categories + Enterprise Action Buttons */}
-        <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 scrollbar-none flex-shrink-0">
-          <div className="flex items-center space-x-2">
+        {/* Top Control Toolbar: Categories + Sleek Action Dropdowns */}
+        <div className="flex items-center justify-between gap-3 pb-1 flex-shrink-0">
+          {/* Category Pills (Scrollable with smooth modern styling) */}
+          <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none py-1 flex-1 min-w-0">
             {categories.map((cat) => {
               const isSelected = selectedCategory === cat.id;
               return (
                 <button
                   key={cat.id}
                   onClick={() => setSelectedCategory(cat.id)}
-                  className={`flex items-center space-x-2 px-4 py-2.5 rounded-2xl text-xs font-bold whitespace-nowrap transition-all ${
+                  className={`flex items-center space-x-2 px-4 py-2 rounded-2xl text-xs font-extrabold whitespace-nowrap transition-all duration-150 ${
                     isSelected
-                      ? 'bg-amber-600 text-stone-950 shadow-lg shadow-amber-900/40 border border-amber-500'
-                      : 'bg-stone-900/80 border border-stone-800 text-stone-300 hover:bg-stone-800'
+                      ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 text-zinc-950 shadow-lg shadow-amber-500/20 border border-amber-300'
+                      : 'bg-zinc-900/90 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 hover:bg-zinc-800/60'
                   }`}
                 >
-                  <Coffee className={`w-4 h-4 ${isSelected ? 'text-stone-950' : 'text-amber-400'}`} />
+                  <Coffee className={`w-3.5 h-3.5 ${isSelected ? 'text-zinc-950' : 'text-amber-400'}`} />
                   <span>{cat.name}</span>
                 </button>
               );
             })}
           </div>
 
-          <div className="flex items-center space-x-2">
+          {/* Compact Action Controls: Orders + Terminal ▾ + Tools ▾ */}
+          <div className="flex items-center space-x-2 flex-shrink-0">
+            {/* 1. Orders History Modal */}
             <button
               onClick={() => setShowOrderHistoryModal(true)}
-              className="px-3 py-2 rounded-2xl bg-amber-950/60 border border-amber-600/50 hover:bg-amber-900/60 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-sm"
+              className="px-3.5 py-2 rounded-2xl bg-zinc-900/90 border border-amber-500/40 hover:border-amber-400 text-amber-300 text-xs font-extrabold flex items-center space-x-1.5 transition-all shadow-sm hover:shadow-amber-500/10"
               title="Order History, Re-print Receipt & Refunds (ប្រវត្តិវិក្កយបត្រ)"
             >
               <History className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">Orders</span>
+              <span>Orders</span>
             </button>
 
-            <button
-              onClick={() => setShowXReportModal(true)}
-              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-500 text-stone-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="Shift Handover Report (របាយការណ៍ប្តូរវេន X-Report)"
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">X-Report</span>
-            </button>
+            {/* 2. Terminal Dropdown Menu */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowTerminalMenu(!showTerminalMenu);
+                  setShowToolsMenu(false);
+                }}
+                className="px-3 py-2 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 text-zinc-200 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                <span>Terminal</span>
+                <ChevronDown className="w-3 h-3 text-zinc-400" />
+              </button>
 
-            <button
-              onClick={() => setShowZReportModal(true)}
-              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-600/50 text-stone-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="End-of-Day Z-Report Closeout (បិទបញ្ជីប្រចាំថ្ងៃ)"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">Z-Report</span>
-            </button>
+              {showTerminalMenu && (
+                <div 
+                  className="absolute right-0 top-11 w-64 bg-[#121217] border border-zinc-700 rounded-2xl p-2 shadow-2xl space-y-1 z-50 animate-in fade-in zoom-in-95"
+                  onClick={() => setShowTerminalMenu(false)}
+                >
+                  <div className="text-[10px] text-zinc-400 font-semibold px-2.5 py-1 uppercase border-b border-zinc-800 mb-1">
+                    Shift & Terminal Management
+                  </div>
+                  <button
+                    onClick={() => setShowXReportModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                  >
+                    <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">X-Report (ប្តូរវេន)</span>
+                      <span className="text-[10px] text-zinc-400">Shift Handover & Cash Count</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowZReportModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">Z-Report (បិទបញ្ជី)</span>
+                      <span className="text-[10px] text-zinc-400">End-of-Day Closeout</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowPettyCashModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-emerald-400 transition-colors"
+                  >
+                    <Wallet className="w-4 h-4 text-emerald-400" />
+                    <div>
+                      <span className="font-bold block">Petty Cash (កត់ចំណាយ)</span>
+                      <span className="text-[10px] text-zinc-400">Daily Store Expense</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={handleOpenCashDrawerNoSale}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                  >
+                    <KeyRound className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">Open Drawer (No Sale)</span>
+                      <span className="text-[10px] text-zinc-400">Manual Solenoid Kick</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowSecurityAuditModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-emerald-400 transition-colors"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    <div>
+                      <span className="font-bold block">Security Audit Log</span>
+                      <span className="text-[10px] text-zinc-400">Anti-Theft Activity Trail</span>
+                    </div>
+                  </button>
+                  <div className="border-t border-zinc-800 my-1"></div>
+                  <button
+                    onClick={() => {
+                      logSecurityEvent('SCREEN_LOCK', 'Terminal Locked', 'Cashier manually locked register screen', user?.name || 'Staff');
+                      setIsScreenLocked(true);
+                    }}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-red-300 hover:bg-red-950/40 transition-colors"
+                  >
+                    <Lock className="w-4 h-4 text-red-400" />
+                    <span className="font-bold">Lock Register Screen</span>
+                  </button>
+                </div>
+              )}
+            </div>
 
-            <button
-              onClick={() => setShowPettyCashModal(true)}
-              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-emerald-500/50 text-emerald-400 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="Petty Cash Daily Out-of-Pocket Expenses (កត់ចំណាយហាង)"
-            >
-              <Wallet className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden xl:inline">Petty Cash</span>
-            </button>
+            {/* 3. Tools & Features Dropdown Menu */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  setShowToolsMenu(!showToolsMenu);
+                  setShowTerminalMenu(false);
+                }}
+                className="px-3 py-2 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 text-zinc-200 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                <span>Tools</span>
+                <ChevronDown className="w-3 h-3 text-zinc-400" />
+              </button>
 
-            <button
-              onClick={() => setShowPromotionModal(true)}
-              className="px-3 py-2 rounded-2xl bg-purple-950/40 border border-purple-600/40 text-purple-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="Automated Promotions & Happy Hour Engine (កម្មវិធីបញ្ចុះតម្លៃ)"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-              <span className="hidden xl:inline">Promos</span>
-            </button>
-
-            <button
-              onClick={() => setShowBroadcastModal(true)}
-              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-blue-500/50 text-blue-400 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="Store Broadcast Notice Banner (ផ្សាយដំណឹង)"
-            >
-              <Megaphone className="w-3.5 h-3.5 text-blue-400" />
-              <span className="hidden xl:inline">Notice</span>
-            </button>
-
-            <button
-              onClick={() => {
-                logSecurityEvent(
-                  'SCREEN_LOCK',
-                  'Terminal Locked',
-                  'Cashier manually locked register screen',
-                  user?.name || 'Staff'
-                );
-                setIsScreenLocked(true);
-              }}
-              className="px-3 py-2 rounded-2xl bg-amber-950/60 border border-amber-600/50 hover:bg-amber-900/60 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-sm"
-              title="Lock Register Screen (ចាក់សោអេក្រង់)"
-            >
-              <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">Lock POS</span>
-            </button>
-
-            <button
-              onClick={handleOpenCashDrawerNoSale}
-              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-500 text-stone-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="Open Cash Drawer (No Sale / បើកថតលុយ)"
-            >
-              <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">No Sale</span>
-            </button>
-
-            <button
-              onClick={() => setShowSecurityAuditModal(true)}
-              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-emerald-500/50 text-emerald-400 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="View Security & Anti-Theft Audit Trail"
-            >
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden xl:inline">Audit Log</span>
-            </button>
-
-            <button
-              onClick={() => setShowAiBaristaModal(true)}
-              className="px-3 py-2 rounded-2xl bg-gradient-to-r from-amber-950 to-stone-900 border border-amber-500/50 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors shadow-md"
-              title="AI Barista Brew Assistant"
-            >
-              <Cpu className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">AI Barista</span>
-            </button>
-
-            <button
-              onClick={() => setShowQrSelfOrderModal(true)}
-              className="px-3 py-2 rounded-2xl bg-amber-950/40 border border-amber-600/40 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="Customer Self-Service QR Kiosk"
-            >
-              <QrCode className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">QR Kiosk</span>
-            </button>
-
-            <button
-              onClick={() => setShowGiftCardWalletModal(true)}
-              className="px-3 py-2 rounded-2xl bg-purple-950/40 border border-purple-600/40 text-purple-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-              title="Gift Card & E-Wallet"
-            >
-              <Gift className="w-3.5 h-3.5 text-purple-400" />
-              <span className="hidden xl:inline">Gift Card</span>
-            </button>
-
-            <button
-              onClick={() => setShowCashDrawerModal(true)}
-              className="px-3 py-2 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-500 text-amber-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-            >
-              <Lock className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden xl:inline">{t('shiftRegister')}</span>
-            </button>
-
-            <button
-              onClick={() => setShowAiForecastModal(true)}
-              className="px-3 py-2 rounded-2xl bg-gradient-to-r from-purple-900/60 to-amber-900/60 border border-purple-500/40 text-purple-300 text-xs font-bold flex items-center space-x-1.5 transition-colors"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">{t('aiForecast')}</span>
-            </button>
+              {showToolsMenu && (
+                <div 
+                  className="absolute right-0 top-11 w-64 bg-[#121217] border border-zinc-700 rounded-2xl p-2 shadow-2xl space-y-1 z-50 animate-in fade-in zoom-in-95"
+                  onClick={() => setShowToolsMenu(false)}
+                >
+                  <div className="text-[10px] text-zinc-400 font-semibold px-2.5 py-1 uppercase border-b border-zinc-800 mb-1">
+                    Smart Features & AI
+                  </div>
+                  <button
+                    onClick={() => setShowAiBaristaModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                  >
+                    <Cpu className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">AI Barista Assistant</span>
+                      <span className="text-[10px] text-zinc-400">Flavor profile & recipe guide</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowQrSelfOrderModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                  >
+                    <QrCode className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">Customer QR Kiosk</span>
+                      <span className="text-[10px] text-zinc-400">Table & counter self-ordering</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowPromotionModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-purple-300 transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4 text-purple-400" />
+                    <div>
+                      <span className="font-bold block">Promotions Engine</span>
+                      <span className="text-[10px] text-zinc-400">Happy Hour & discounts</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowGiftCardWalletModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-purple-300 transition-colors"
+                  >
+                    <Gift className="w-4 h-4 text-purple-400" />
+                    <div>
+                      <span className="font-bold block">Gift Card & Wallet</span>
+                      <span className="text-[10px] text-zinc-400">Balance top-up & lookup</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowCashDrawerModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                  >
+                    <Lock className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">{t('shiftRegister')}</span>
+                      <span className="text-[10px] text-zinc-400">Open/close cash float</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowAiForecastModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                  >
+                    <Sparkles className="w-4 h-4 text-amber-400" />
+                    <div>
+                      <span className="font-bold block">{t('aiForecast')}</span>
+                      <span className="text-[10px] text-zinc-400">Demand & sales prediction</span>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => setShowBroadcastModal(true)}
+                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-blue-400 transition-colors"
+                  >
+                    <Megaphone className="w-4 h-4 text-blue-400" />
+                    <div>
+                      <span className="font-bold block">Store Notice Banner</span>
+                      <span className="text-[10px] text-zinc-400">Broadcast messages</span>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -531,34 +596,34 @@ export const PosPage: React.FC = () => {
         {/* Search Bar & Hold Order Barcode Simulator */}
         <div className="flex items-center space-x-3 flex-shrink-0">
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-stone-500 absolute left-3.5 top-3.5" />
+            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
             <input
               type="text"
               placeholder={t('searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-2xl glass-input text-stone-100 text-sm focus:outline-none"
+              className="w-full pl-10 pr-4 py-2.5 rounded-2xl glass-input text-zinc-100 text-sm focus:outline-none placeholder-zinc-500 shadow-inner"
             />
           </div>
 
           <button
             onClick={() => setShowHoldModal(true)}
-            className="px-3.5 py-2.5 rounded-2xl bg-amber-950/40 border border-amber-700/40 text-amber-300 hover:bg-amber-900/40 text-xs font-bold flex items-center space-x-2 transition-colors relative"
+            className="px-3.5 py-2.5 rounded-2xl bg-zinc-900/90 border border-zinc-700/80 hover:border-amber-500/50 text-amber-300 text-xs font-bold flex items-center space-x-2 transition-all shadow-sm relative"
           >
-            <PauseCircle className="w-4 h-4" />
+            <PauseCircle className="w-4 h-4 text-amber-400" />
             <span className="hidden sm:inline">{t('holdQueue')}</span>
             {heldOrders.length > 0 && (
-              <span className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 text-[10px] font-bold flex items-center justify-center">
+              <span className="w-5 h-5 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 text-zinc-950 text-[10px] font-black flex items-center justify-center shadow-md">
                 {heldOrders.length}
               </span>
             )}
           </button>
 
           <div
-            className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-2xl bg-stone-900/90 border border-emerald-500/40 text-emerald-400 text-xs font-mono font-bold"
+            className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-2xl bg-zinc-900/90 border border-emerald-500/40 text-emerald-400 text-xs font-mono font-bold shadow-inner"
             title="Hardware USB Barcode Scanner is listening globally. Scan any SKU or Barcode directly!"
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400"></span>
             <span className="hidden md:inline">Scanner Active</span>
           </div>
 
@@ -572,7 +637,7 @@ export const PosPage: React.FC = () => {
                 setTimeout(() => setLastScannedItem(null), 3500);
               }
             }}
-            className="px-4 py-2.5 rounded-2xl bg-stone-900 border border-stone-800 hover:border-amber-600/50 text-stone-300 text-xs font-bold flex items-center space-x-2 transition-colors"
+            className="px-4 py-2.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-amber-500/50 text-zinc-300 hover:text-white text-xs font-bold flex items-center space-x-2 transition-colors shadow-sm"
             title="Click to test barcode scan trigger"
           >
             <Barcode className="w-4 h-4 text-amber-400" />
@@ -581,8 +646,8 @@ export const PosPage: React.FC = () => {
         </div>
 
         {/* Products Touch Grid */}
-        <div className="flex-1 min-h-0 overflow-y-auto pr-2 pb-20 scrollbar-thin">
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-20 scrollbar-thin">
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3.5">
             {filteredProducts.map((product) => {
               const cartQty = cart
                 .filter((item) => item.productId === product.id)
@@ -591,27 +656,27 @@ export const PosPage: React.FC = () => {
               return (
                 <div
                   key={product.id}
-                  className={`bg-stone-900/80 border rounded-3xl p-3 text-left flex flex-col justify-between transition-all duration-200 shadow-xl group glass-card relative ${
+                  className={`bg-[#121217] border rounded-3xl p-3 text-left flex flex-col justify-between transition-all duration-200 shadow-xl group relative overflow-hidden ${
                     !product.isAvailable
-                      ? 'border-red-500/50 opacity-75'
+                      ? 'border-red-500/30 opacity-70'
                       : cartQty > 0
-                      ? 'border-amber-500 shadow-lg shadow-amber-950/40 ring-1 ring-amber-500/50 scale-[1.01]'
-                      : 'border-stone-800 hover:border-amber-600/60 hover:scale-[1.02]'
+                      ? 'border-amber-500/90 shadow-xl shadow-amber-500/15 ring-1 ring-amber-500/50 bg-[#15151c]'
+                      : 'border-zinc-800/80 hover:border-amber-500/50 hover:shadow-2xl hover:shadow-amber-500/10 hover:-translate-y-1'
                   }`}
                 >
                   <button onClick={() => handleProductClick(product)} className="w-full text-left">
-                    <div className="relative h-32 rounded-2xl overflow-hidden mb-3">
+                    <div className="relative h-32 rounded-2xl overflow-hidden mb-3 bg-zinc-950">
                       <img
                         src={product.image}
                         alt={product.name}
-                        className={`w-full h-full object-cover transition-transform duration-300 ${
+                        className={`w-full h-full object-cover transition-transform duration-500 ${
                           !product.isAvailable ? 'grayscale opacity-60' : 'group-hover:scale-105'
                         }`}
                       />
 
                       {/* Quantity in Cart Badge */}
                       {cartQty > 0 && (
-                        <div className="absolute top-2 left-2 z-10 px-2.5 py-1 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 text-stone-950 font-black text-[11px] shadow-lg shadow-amber-950/80 border border-yellow-200 flex items-center space-x-1 animate-in zoom-in-75">
+                        <div className="absolute top-2 left-2 z-10 px-2.5 py-1 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-extrabold text-[11px] shadow-lg shadow-black/60 border border-emerald-300/50 flex items-center space-x-1 animate-in zoom-in-75">
                           <span>✓ {cartQty}</span>
                           <span className="text-[9px] font-bold">ក្នុងកន្ត្រក</span>
                         </div>
@@ -619,37 +684,39 @@ export const PosPage: React.FC = () => {
 
                       {!product.isAvailable ? (
                         <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
-                          <span className="px-3 py-1 rounded-full bg-red-600 text-white font-extrabold text-[10px] uppercase tracking-wider shadow-lg animate-pulse">
+                          <span className="px-3 py-1 rounded-full bg-red-600 text-white font-extrabold text-[10px] uppercase tracking-wider shadow-lg">
                             ⚠️ OUT OF STOCK
                           </span>
                         </div>
                       ) : (
-                        <div className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-stone-950/80 backdrop-blur-sm border border-stone-700 text-[10px] font-bold text-amber-300">
+                        <div className="absolute top-2 right-2 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 font-black text-xs shadow-lg shadow-black/60 border border-amber-300/40">
                           ${product.sellingPrice.toFixed(2)}
                         </div>
                       )}
                     </div>
 
-                    <h4 className="text-sm font-bold text-stone-100 line-clamp-1 group-hover:text-amber-300 transition-colors">
+                    <h4 className="text-sm font-extrabold text-zinc-100 line-clamp-1 group-hover:text-amber-300 transition-colors">
                       {product.name}
                     </h4>
-                    <p className="text-[11px] text-stone-400 line-clamp-2 mt-0.5 leading-snug">
+                    <p className="text-[11px] text-zinc-400 line-clamp-2 mt-1 leading-snug">
                       {product.description}
                     </p>
 
-                    <div className="mt-1 flex items-center justify-between text-[10px] font-mono text-stone-500">
+                    <div className="mt-2 pt-2 border-t border-zinc-800/60 flex items-center justify-between text-[10px] font-mono text-zinc-500">
                       <span>SKU: {product.sku}</span>
-                      <span className="text-emerald-400 font-semibold">● In Stock</span>
+                      <span className={product.isAvailable ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                        {product.isAvailable ? '● In Stock' : '✕ Unavailable'}
+                      </span>
                     </div>
                   </button>
 
-                  <div className="mt-3 flex items-center justify-between pt-2 border-t border-stone-800/80 text-[11px]">
+                  <div className="mt-3 flex items-center justify-between pt-2 border-t border-zinc-800/80 text-[11px]">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setRecipeProduct(product);
                       }}
-                      className="text-stone-500 hover:text-amber-400 font-mono text-[10px] flex items-center space-x-1"
+                      className="px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-amber-400 hover:border-amber-500/40 font-mono text-[10px] flex items-center space-x-1 transition-colors"
                       title="View Recipe & Ingredients"
                     >
                       <BookOpen className="w-3 h-3 text-amber-400" />
@@ -658,7 +725,7 @@ export const PosPage: React.FC = () => {
 
                     {cartQty > 0 ? (
                       <div
-                        className="flex items-center space-x-1.5 bg-stone-950/90 border border-amber-500/60 rounded-xl px-2 py-0.5 shadow-sm"
+                        className="flex items-center space-x-1.5 bg-[#09090c] border border-amber-500/70 rounded-xl px-2 py-0.5 shadow-md"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <button
@@ -667,7 +734,7 @@ export const PosPage: React.FC = () => {
                             const targetItem = cart.find((i) => i.productId === product.id);
                             if (targetItem) updateCartQuantity(targetItem.cartItemId, -1);
                           }}
-                          className="w-5 h-5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 flex items-center justify-center font-bold text-xs"
+                          className="w-5 h-5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 flex items-center justify-center font-bold text-xs"
                           title="Deduct 1"
                         >
                           -
@@ -678,7 +745,7 @@ export const PosPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handleProductClick(product)}
-                          className="w-5 h-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 flex items-center justify-center font-bold text-xs"
+                          className="w-5 h-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center font-bold text-xs"
                           title="Add 1 more"
                         >
                           +
@@ -687,11 +754,14 @@ export const PosPage: React.FC = () => {
                     ) : (
                       <button
                         onClick={() => handleProductClick(product)}
-                        className={`font-bold transition-transform ${
-                          !product.isAvailable ? 'text-red-400' : 'text-amber-400 group-hover:translate-x-0.5'
+                        disabled={!product.isAvailable}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 ${
+                          !product.isAvailable
+                            ? 'text-zinc-600 cursor-not-allowed'
+                            : 'bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-zinc-950 border border-amber-500/40 hover:shadow-md'
                         }`}
                       >
-                        {!product.isAvailable ? 'Unavailable' : 'Select +'}
+                        <span>Select +</span>
                       </button>
                     )}
                   </div>
@@ -703,42 +773,42 @@ export const PosPage: React.FC = () => {
       </div>
 
       {/* Right Area: Order Cart Workspace (4 Columns) */}
-      <div className="lg:col-span-4 bg-stone-900/90 border border-amber-700/30 rounded-3xl p-5 flex flex-col justify-between glass-panel h-full min-h-0 shadow-2xl overflow-hidden">
+      <div className="lg:col-span-4 bg-[#0d0d12]/95 border border-zinc-800/90 rounded-3xl p-5 flex flex-col justify-between glass-panel h-full min-h-0 shadow-2xl overflow-hidden">
         {/* Order Header & Type Selector */}
         <div className="space-y-4 flex-shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2">
               <ShoppingCart className="w-5 h-5 text-amber-400" />
-              <h3 className="text-base font-bold text-stone-100">{t('currentOrder')}</h3>
+              <h3 className="text-base font-extrabold text-zinc-100">{t('currentOrder')}</h3>
             </div>
             <div className="flex items-center space-x-2">
               {cart.length > 0 && (
                 <button
                   type="button"
                   onClick={handleRequestVoidCart}
-                  className="px-2 py-0.5 rounded-lg bg-red-950/60 border border-red-700/50 text-red-300 hover:bg-red-900/60 text-[10px] font-bold flex items-center space-x-1 transition-colors"
+                  className="px-2.5 py-1 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 hover:bg-red-900/60 text-[10px] font-bold flex items-center space-x-1 transition-colors"
                   title="Void Cart (Manager PIN required)"
                 >
-                  <Trash2 className="w-3 h-3" />
+                  <Trash2 className="w-3 h-3 text-red-400" />
                   <span>Void Cart</span>
                 </button>
               )}
-              <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2.5 py-1 rounded-full border border-amber-900/40">
+              <span className="text-xs font-mono font-black text-amber-300 bg-amber-500/15 px-3 py-1 rounded-full border border-amber-500/30">
                 {cart.length} {t('items')}
               </span>
             </div>
           </div>
 
           {/* Order Type Selector */}
-          <div className="grid grid-cols-4 gap-1 p-1 bg-stone-950 rounded-2xl border border-stone-800">
+          <div className="grid grid-cols-4 gap-1 p-1 bg-[#121217] rounded-2xl border border-zinc-800">
             {(['DINE_IN', 'TAKE_AWAY', 'DELIVERY', 'DRIVE_THROUGH'] as OrderType[]).map((tType) => (
               <button
                 key={tType}
                 onClick={() => setOrderType(tType)}
-                className={`py-2 rounded-xl text-[10px] font-bold transition-all ${
+                className={`py-2 rounded-xl text-[10px] font-extrabold transition-all ${
                   orderType === tType
-                    ? 'bg-amber-600 text-stone-950 shadow-md'
-                    : 'text-stone-400 hover:text-stone-200'
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 shadow-md font-black'
+                    : 'text-zinc-400 hover:text-zinc-200'
                 }`}
               >
                 {tType === 'DINE_IN' ? t('dineIn') : tType === 'TAKE_AWAY' ? t('takeAway') : tType === 'DELIVERY' ? t('delivery') : t('driveThrough')}
@@ -748,15 +818,15 @@ export const PosPage: React.FC = () => {
 
           {/* Dine-In Table Picker Pill */}
           {orderType === 'DINE_IN' && (
-            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-amber-950/40 border border-amber-600/40 text-xs shadow-sm">
-              <span className="flex items-center space-x-1.5 text-stone-300 font-semibold">
+            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-[#14141a] border border-amber-500/30 text-xs shadow-sm">
+              <span className="flex items-center space-x-1.5 text-zinc-300 font-semibold">
                 <Layers className="w-4 h-4 text-amber-400" />
                 <span>តុអង្គុយ (Table):</span>
               </span>
               <button
                 type="button"
                 onClick={() => setShowTablePickerModal(true)}
-                className="px-3 py-1 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs shadow flex items-center space-x-1 transition-all"
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:brightness-110 text-zinc-950 font-black text-xs shadow flex items-center space-x-1 transition-all"
               >
                 <span>{selectedTable ? `${selectedTable.name} (${selectedTable.tableNumber})` : '+ ជ្រើសរើសលេខតុ'}</span>
               </button>
@@ -765,29 +835,29 @@ export const PosPage: React.FC = () => {
         </div>
 
         {/* Cart Item Stream */}
-        <div className="flex-1 min-h-0 overflow-y-auto my-3 space-y-2.5 pr-1">
+        <div className="flex-1 min-h-0 overflow-y-auto my-3 space-y-2.5 pr-1 scrollbar-thin">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2">
-              <div className="w-12 h-12 rounded-2xl bg-stone-800/60 border border-stone-700 flex items-center justify-center text-stone-500">
-                <Coffee className="w-6 h-6" />
+              <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-600">
+                <Coffee className="w-7 h-7 text-amber-500/40" />
               </div>
-              <p className="text-xs font-bold text-stone-400">Cart is empty</p>
-              <p className="text-[11px] text-stone-600">Select drinks or bakery items from the menu to start order</p>
+              <p className="text-xs font-bold text-zinc-300">Cart is empty</p>
+              <p className="text-[11px] text-zinc-500">Select drinks or bakery items from the menu to start order</p>
             </div>
           ) : (
             cart.map((item) => (
-              <div key={item.cartItemId} className="p-3 rounded-2xl bg-stone-950/60 border border-stone-800 space-y-2">
+              <div key={item.cartItemId} className="p-3 rounded-2xl bg-[#121217] border border-zinc-800/80 space-y-2">
                 <div className="flex items-start justify-between">
                   <div className="flex items-center space-x-2.5 overflow-hidden">
-                    <img src={item.image} alt={item.name} className="w-9 h-9 rounded-xl object-cover" />
+                    <img src={item.image} alt={item.name} className="w-9 h-9 rounded-xl object-cover border border-zinc-700/50" />
                     <div className="overflow-hidden">
-                      <h5 className="text-xs font-bold text-stone-200 truncate">{item.name}</h5>
-                      <span className="text-[10px] text-amber-400 font-mono">${item.unitPrice.toFixed(2)}</span>
+                      <h5 className="text-xs font-extrabold text-zinc-200 truncate">{item.name}</h5>
+                      <span className="text-[10px] text-amber-400 font-mono font-bold">${item.unitPrice.toFixed(2)}</span>
                     </div>
                   </div>
                   <button
                     onClick={() => updateCartQuantity(item.cartItemId, -99)}
-                    className="text-stone-500 hover:text-red-400 p-1"
+                    className="text-zinc-500 hover:text-red-400 p-1 transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -795,13 +865,13 @@ export const PosPage: React.FC = () => {
 
                 {/* Variant & Toppings info */}
                 {(item.selectedVariant || item.selectedToppings.length > 0 || item.notes) && (
-                  <div className="text-[10px] text-stone-400 pl-2 border-l border-amber-600/40 space-y-0.5">
+                  <div className="text-[10px] text-zinc-400 pl-2 border-l-2 border-amber-500/50 space-y-0.5">
                     {item.selectedVariant && <div>Size: {item.selectedVariant.name}</div>}
                     {item.selectedToppings.length > 0 && (
                       <div>+ {item.selectedToppings.map((tp) => tp.name).join(', ')}</div>
                     )}
                     {item.notes && (
-                      <div className="text-amber-400 font-bold bg-amber-950/40 px-1.5 py-0.5 rounded text-[9px] inline-block">
+                      <div className="text-amber-300 font-bold bg-amber-500/15 px-1.5 py-0.5 rounded text-[9px] inline-block border border-amber-500/30">
                         📝 {item.notes}
                       </div>
                     )}
@@ -823,10 +893,10 @@ export const PosPage: React.FC = () => {
                         key={tag}
                         type="button"
                         onClick={() => toggleItemNote(item.cartItemId, tag)}
-                        className={`px-1.5 py-0.5 rounded text-[9px] font-bold transition-all ${
+                        className={`px-2 py-0.5 rounded-lg text-[9px] font-bold transition-all ${
                           active
-                            ? 'bg-amber-500 text-stone-950 shadow-sm'
-                            : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-stone-200'
+                            ? 'bg-amber-500 text-zinc-950 font-black shadow-sm'
+                            : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200'
                         }`}
                       >
                         {tag}
@@ -836,23 +906,23 @@ export const PosPage: React.FC = () => {
                 </div>
 
                 {/* Quantity Controller & Subtotal */}
-                <div className="flex items-center justify-between pt-1 border-t border-stone-800/60">
-                  <div className="flex items-center space-x-2 bg-stone-900 px-2 py-1 rounded-xl border border-stone-800">
+                <div className="flex items-center justify-between pt-1 border-t border-zinc-800/80">
+                  <div className="flex items-center space-x-2 bg-[#09090c] px-2 py-1 rounded-xl border border-zinc-800">
                     <button
                       onClick={() => updateCartQuantity(item.cartItemId, -1)}
-                      className="w-5 h-5 rounded-lg bg-stone-800 text-stone-300 flex items-center justify-center font-bold text-xs"
+                      className="w-5 h-5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 flex items-center justify-center font-bold text-xs"
                     >
                       -
                     </button>
-                    <span className="text-xs font-bold text-amber-300 w-4 text-center">{item.quantity}</span>
+                    <span className="text-xs font-black text-amber-300 w-5 text-center font-mono">{item.quantity}</span>
                     <button
                       onClick={() => updateCartQuantity(item.cartItemId, 1)}
-                      className="w-5 h-5 rounded-lg bg-amber-600 text-stone-950 flex items-center justify-center font-bold text-xs"
+                      className="w-5 h-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center font-bold text-xs"
                     >
                       +
                     </button>
                   </div>
-                  <span className="text-xs font-bold text-stone-100 font-mono">${item.itemSubtotal.toFixed(2)}</span>
+                  <span className="text-xs font-black text-zinc-100 font-mono">${item.itemSubtotal.toFixed(2)}</span>
                 </div>
               </div>
             ))
@@ -860,22 +930,22 @@ export const PosPage: React.FC = () => {
         </div>
 
         {/* Bill Breakdown & Checkout Bar */}
-        <div className="pt-4 border-t border-stone-800/80 space-y-3 flex-shrink-0">
+        <div className="pt-4 border-t border-zinc-800/80 space-y-3 flex-shrink-0">
           {/* Coupon Code & Split Bill Bar */}
           <div className="flex items-center justify-between text-xs">
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setShowPromotionModal(true)}
-                className="text-amber-400 hover:text-amber-300 font-semibold flex items-center space-x-1"
+                className="text-amber-400 hover:text-amber-300 font-bold flex items-center space-x-1"
                 title="Open Promotions & Happy Hour Engine"
               >
                 <Sparkles className="w-3.5 h-3.5 text-purple-400" />
                 <span>{discountPercent > 0 ? `${discountPercent}% ${t('discount')}` : '🎁 Promos & Deals'}</span>
               </button>
-              <span className="text-stone-600">•</span>
+              <span className="text-zinc-600">•</span>
               <button
                 onClick={() => setShowDiscountInput(!showDiscountInput)}
-                className="text-stone-400 hover:text-stone-300 hover:underline text-[11px]"
+                className="text-zinc-400 hover:text-zinc-200 hover:underline text-[11px]"
               >
                 Code
               </button>
@@ -884,7 +954,7 @@ export const PosPage: React.FC = () => {
             {cart.length > 0 && (
               <button
                 onClick={() => setShowSplitModal(true)}
-                className="text-amber-300 hover:text-amber-200 flex items-center space-x-1 font-semibold"
+                className="text-amber-300 hover:text-amber-200 flex items-center space-x-1 font-bold"
               >
                 <ArrowRightLeft className="w-3.5 h-3.5" />
                 <span>Split Bill</span>
@@ -903,32 +973,37 @@ export const PosPage: React.FC = () => {
               />
               <button
                 onClick={handleApplyCoupon}
-                className="px-3 py-1.5 rounded-xl bg-amber-600 text-stone-950 font-bold text-xs"
+                className="px-3 py-1.5 rounded-xl bg-amber-500 text-zinc-950 font-bold text-xs"
               >
                 Apply
               </button>
             </div>
           )}
 
-          {/* Subtotal, Tax, Total */}
-          <div className="space-y-1.5 text-xs text-stone-400 font-sans">
+          {/* Subtotal, Tax, Total with Dual Currency (USD & KHR) */}
+          <div className="space-y-1.5 text-xs text-zinc-400 font-sans">
             <div className="flex justify-between">
               <span>{t('subtotal')}</span>
-              <span className="font-mono text-stone-200">${subtotal.toFixed(2)}</span>
+              <span className="font-mono text-zinc-200 font-bold">${subtotal.toFixed(2)}</span>
             </div>
             {discountAmount > 0 && (
               <div className="flex justify-between text-emerald-400 font-semibold">
                 <span>{t('discount')} ({discountPercent}%)</span>
-                <span className="font-mono">-${discountAmount.toFixed(2)}</span>
+                <span className="font-mono font-bold">-${discountAmount.toFixed(2)}</span>
               </div>
             )}
             <div className="flex justify-between">
-              <span>{t('tax')}</span>
-              <span className="font-mono text-stone-200">${taxAmount.toFixed(2)}</span>
+              <span>{t('tax')} (10% VAT)</span>
+              <span className="font-mono text-zinc-200 font-bold">${taxAmount.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between items-baseline pt-2 border-t border-stone-800 text-base font-extrabold text-stone-100">
-              <span>{t('totalPayable')}</span>
-              <span className="text-2xl font-mono text-amber-400">${totalAmount.toFixed(2)}</span>
+            <div className="flex justify-between items-baseline pt-2 border-t border-zinc-800 text-base font-extrabold text-zinc-100">
+              <div>
+                <span>{t('totalPayable')}</span>
+                <span className="text-[11px] font-normal text-zinc-400 block font-mono">
+                  ៛{(Math.round(totalAmount * 4100 / 100) * 100).toLocaleString()} KHR
+                </span>
+              </div>
+              <span className="text-2xl font-mono font-black text-amber-400 gold-gradient-text">${totalAmount.toFixed(2)}</span>
             </div>
           </div>
 
@@ -936,10 +1011,10 @@ export const PosPage: React.FC = () => {
           <button
             disabled={cart.length === 0}
             onClick={handleInitiateCheckout}
-            className={`w-full py-4 rounded-2xl font-extrabold text-sm flex items-center justify-center space-x-2 transition-all ${
+            className={`w-full py-3.5 rounded-2xl font-black text-base flex items-center justify-center space-x-2.5 transition-all shadow-xl ${
               cart.length === 0
-                ? 'bg-stone-800 text-stone-500 cursor-not-allowed'
-                : 'bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 hover:from-amber-500 hover:to-yellow-400 text-stone-950 shadow-xl shadow-amber-900/40 transform active:scale-98'
+                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                : 'bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:brightness-110 active:scale-[0.99] text-zinc-950 shadow-amber-500/25 cursor-pointer'
             }`}
           >
             <CreditCard className="w-5 h-5 stroke-[2.5]" />
