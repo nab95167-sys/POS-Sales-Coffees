@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { X, ShieldCheck, Check, Save, Lock, UserCheck } from 'lucide-react';
+import { X, ShieldCheck, Check, Save, Lock, UserCheck, RotateCcw, CheckSquare, Square, Edit3 } from 'lucide-react';
 import { Role } from '../../types';
+import { soundEffects } from '../../services/soundService';
 
 interface Props {
   onClose: () => void;
@@ -26,22 +27,50 @@ export const PERMISSION_LIST: PermissionItem[] = [
   { id: 'settings:edit', category: 'Administration', name: 'Edit Store & Telegram Settings', description: 'Configure bot token, taxes, currencies, and shop metadata' },
 ];
 
+const DEFAULT_ROLE_NOTES: Record<Role, string> = {
+  ADMIN: 'Full root access to all system modules, finances, settings, and staff HR.',
+  MANAGER: 'Authorizes voids, petty cash, discounts, shift handover, inventory restocking and reports.',
+  CASHIER: 'Front counter operations: Ringing up sales, taking cash & ABA KHQR payments, and customer care.',
+  BARISTA: 'Kitchen Display System (KDS) order fulfillment, drink brewing, and recipe stock checks.',
+};
+
+const DEFAULT_ROLE_PERMS: Record<Role, string[]> = {
+  ADMIN: PERMISSION_LIST.map((p) => p.id),
+  MANAGER: [
+    'pos:access', 'pos:discount', 'pos:void', 'pos:shift_manage',
+    'inventory:view', 'inventory:edit', 'reports:view', 'reports:export'
+  ],
+  CASHIER: ['pos:access', 'pos:discount', 'pos:shift_manage', 'inventory:view'],
+  BARISTA: ['pos:access', 'inventory:view'],
+};
+
 export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
   const [selectedRole, setSelectedRole] = useState<Role>('CASHIER');
-  
+
+  // Role notes state
+  const [roleNotes, setRoleNotes] = useState<Record<Role, string>>(() => {
+    const saved = localStorage.getItem('coffee_pos_role_notes');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return DEFAULT_ROLE_NOTES;
+  });
+
   // Interactive Permission Matrix State
   const [rolePermissions, setRolePermissions] = useState<Record<Role, string[]>>(() => {
     const saved = localStorage.getItem('coffee_pos_rbac_permissions');
-    if (saved) return JSON.parse(saved);
-    return {
-      ADMIN: PERMISSION_LIST.map((p) => p.id),
-      MANAGER: [
-        'pos:access', 'pos:discount', 'pos:void', 'pos:shift_manage',
-        'inventory:view', 'inventory:edit', 'reports:view', 'reports:export'
-      ],
-      CASHIER: ['pos:access', 'pos:discount', 'pos:shift_manage', 'inventory:view'],
-      BARISTA: ['pos:access', 'inventory:view'],
-    };
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return DEFAULT_ROLE_PERMS;
   });
 
   const [isSaved, setIsSaved] = useState(false);
@@ -61,8 +90,40 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
     });
   };
 
+  const handleGrantAll = () => {
+    soundEffects.playBeep();
+    setRolePermissions((prev) => ({
+      ...prev,
+      [selectedRole]: PERMISSION_LIST.map((p) => p.id),
+    }));
+  };
+
+  const handleRevokeAll = () => {
+    soundEffects.playBeep();
+    setRolePermissions((prev) => ({
+      ...prev,
+      [selectedRole]: [],
+    }));
+  };
+
+  const handleResetDefaults = () => {
+    if (confirm(`Reset ${selectedRole} permissions & note back to system factory defaults?`)) {
+      soundEffects.playBeep();
+      setRolePermissions((prev) => ({
+        ...prev,
+        [selectedRole]: DEFAULT_ROLE_PERMS[selectedRole],
+      }));
+      setRoleNotes((prev) => ({
+        ...prev,
+        [selectedRole]: DEFAULT_ROLE_NOTES[selectedRole],
+      }));
+    }
+  };
+
   const handleSavePermissions = () => {
+    soundEffects.playSuccess();
     localStorage.setItem('coffee_pos_rbac_permissions', JSON.stringify(rolePermissions));
+    localStorage.setItem('coffee_pos_role_notes', JSON.stringify(roleNotes));
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
   };
@@ -70,7 +131,7 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
   const categories = ['POS Register', 'Inventory & Recipes', 'Reports & Finance', 'Administration'] as const;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md font-sans">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md font-sans">
       <div className="bg-stone-900 border border-amber-700/40 rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-200 glass-panel">
         {/* Header */}
         <div className="px-6 py-4 bg-stone-950 border-b border-stone-800 flex items-center justify-between">
@@ -79,8 +140,13 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
               <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-stone-100">RBAC Role & Permission Matrix</h3>
-              <p className="text-xs text-stone-400">Configure granular feature access for ADMIN, MANAGER, CASHIER, and BARISTA</p>
+              <h3 className="text-lg font-bold text-stone-100 flex items-center space-x-2">
+                <span>Role Matrix & Permissions</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-700/40 font-mono">
+                  RBAC Security
+                </span>
+              </h3>
+              <p className="text-xs text-stone-400">Configure feature access, privileges & role operational notes</p>
             </div>
           </div>
           <button
@@ -92,16 +158,16 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
         </div>
 
         {/* Role Selector Tabs & Save Bar */}
-        <div className="p-4 bg-stone-950/60 border-b border-stone-800 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
+        <div className="p-4 bg-stone-950/60 border-b border-stone-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-2 overflow-x-auto">
             {(['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'] as Role[]).map((r) => (
               <button
                 key={r}
                 onClick={() => setSelectedRole(r)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all border ${
                   selectedRole === r
-                    ? 'bg-amber-600 text-stone-950 shadow-md'
-                    : 'bg-stone-900 border border-stone-800 text-stone-400 hover:text-stone-200'
+                    ? 'bg-amber-600 text-stone-950 border-amber-500 shadow-md font-black'
+                    : 'bg-stone-900 border-stone-800 text-stone-400 hover:text-stone-200'
                 }`}
               >
                 {r}
@@ -109,17 +175,69 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
             ))}
           </div>
 
-          <button
-            onClick={handleSavePermissions}
-            className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-1.5 transition-colors shadow-md"
-          >
-            {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-            <span>{isSaved ? 'Permissions Saved!' : 'Save Role Matrix'}</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handleSavePermissions}
+              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-1.5 transition-colors shadow-md"
+            >
+              {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+              <span>{isSaved ? 'រក្សាទុកជោគជ័យ!' : 'Save Role Matrix'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Role Note & Quick Permission Toggles */}
+        <div className="p-4 bg-stone-950/40 border-b border-stone-800/80 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-bold text-stone-300 flex items-center space-x-1.5">
+              <Edit3 className="w-3.5 h-3.5 text-amber-400" />
+              <span>Role Operational Note / Description for {selectedRole}:</span>
+            </label>
+
+            <div className="flex items-center space-x-1.5 text-xs">
+              <button
+                type="button"
+                onClick={handleGrantAll}
+                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-emerald-400 text-[11px] font-semibold transition-colors"
+                title="Grant all permissions to this role"
+              >
+                Grant All
+              </button>
+              <button
+                type="button"
+                onClick={handleRevokeAll}
+                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-red-400 text-[11px] font-semibold transition-colors"
+                title="Revoke all permissions from this role"
+              >
+                Clear All
+              </button>
+              <button
+                type="button"
+                onClick={handleResetDefaults}
+                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-400 text-[11px] font-semibold transition-colors"
+                title="Reset to default permissions"
+              >
+                Reset Default
+              </button>
+            </div>
+          </div>
+
+          <input
+            type="text"
+            value={roleNotes[selectedRole] || ''}
+            onChange={(e) =>
+              setRoleNotes((prev) => ({
+                ...prev,
+                [selectedRole]: e.target.value,
+              }))
+            }
+            placeholder="Add operational notes or duty scope for this role..."
+            className="w-full px-3.5 py-2 rounded-xl glass-input text-xs text-stone-200 focus:outline-none focus:border-amber-500 placeholder-stone-600"
+          />
         </div>
 
         {/* Permission List Grid */}
-        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-6">
+        <div className="p-6 max-h-[50vh] overflow-y-auto space-y-6">
           {categories.map((cat) => {
             const catPerms = PERMISSION_LIST.filter((p) => p.category === cat);
             return (
@@ -158,6 +276,17 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
               </div>
             );
           })}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-3.5 bg-stone-950 border-t border-stone-800 flex items-center justify-between text-xs text-stone-500">
+          <span>{rolePermissions[selectedRole]?.length || 0} permissions active for {selectedRole}</span>
+          <button
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 font-bold"
+          >
+            បិទ (Close)
+          </button>
         </div>
       </div>
     </div>
