@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Unlock, Clock, ShieldCheck, UserCheck, Delete } from 'lucide-react';
+import { Lock, Delete, LogOut } from 'lucide-react';
 import { User } from '../../types';
 import { soundEffects } from '../../services/soundService';
-import { logSecurityEvent } from '../../services/securityAuditService';
+import { apiFetch } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 
 interface Props {
   user: User | null;
@@ -10,8 +11,10 @@ interface Props {
 }
 
 export const PosScreenLockModal: React.FC<Props> = ({ user, onUnlock }) => {
+  const { logout } = useAuth();
   const [pin, setPin] = useState('');
-  const [error, setError] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
@@ -20,38 +23,46 @@ export const PosScreenLockModal: React.FC<Props> = ({ user, onUnlock }) => {
   }, []);
 
   const handleKeyPress = (num: string) => {
+    if (isVerifying) return;
     soundEffects.playBeep();
-    setError(false);
+    setErrorMsg('');
     if (pin.length < 4) {
       const nextPin = pin + num;
       setPin(nextPin);
       if (nextPin.length === 4) {
-        verifyUnlock(nextPin);
+        void verifyUnlock(nextPin);
       }
     }
   };
 
   const handleBackspace = () => {
+    if (isVerifying) return;
     soundEffects.playBeep();
-    setError(false);
+    setErrorMsg('');
     setPin((prev) => prev.slice(0, -1));
   };
 
-  const verifyUnlock = (enteredPin: string) => {
-    // Standard unlock PIN is 1234 or matching last digits
-    if (enteredPin === '1234' || enteredPin === '0000') {
+  const verifyUnlock = async (enteredPin: string) => {
+    setIsVerifying(true);
+    try {
+      await apiFetch('/api/v1/security/verify-pin', {
+        method: 'POST',
+        body: {
+          pin: enteredPin,
+          purpose: 'SCREEN_UNLOCK',
+          actionTitle: 'Terminal Unlock',
+          actionDetails: 'Staff unlocked register terminal via PIN pad',
+        },
+        skipAuthRefresh: true,
+      });
       soundEffects.playCashRegister();
-      logSecurityEvent(
-        'SCREEN_UNLOCK',
-        'Terminal Unlocked',
-        'Cashier unlocked register terminal via PIN pad',
-        user?.name || 'Staff'
-      );
       onUnlock();
-    } else {
-      setError(true);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Incorrect security PIN.');
       setPin('');
       soundEffects.playBeep();
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -72,18 +83,29 @@ export const PosScreenLockModal: React.FC<Props> = ({ user, onUnlock }) => {
         </div>
 
         {/* User Card */}
-        <div className="p-3.5 bg-stone-950/80 rounded-2xl border border-stone-800 flex items-center justify-center space-x-3">
-          {user?.avatar ? (
-            <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full object-cover border border-amber-500/50" />
-          ) : (
-            <div className="w-10 h-10 rounded-full bg-amber-600 text-stone-950 font-bold flex items-center justify-center text-sm">
-              {user?.name?.charAt(0) || 'U'}
+        <div className="p-3.5 bg-stone-950/80 rounded-2xl border border-stone-800 flex items-center justify-between px-4">
+          <div className="flex items-center space-x-3">
+            {user?.avatar ? (
+              <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full object-cover border border-amber-500/50" />
+            ) : (
+              <div className="w-10 h-10 rounded-full bg-amber-600 text-stone-950 font-bold flex items-center justify-center text-sm">
+                {user?.name?.charAt(0) || 'U'}
+              </div>
+            )}
+            <div className="text-left">
+              <span className="text-xs font-bold text-stone-200 block">{user?.name || 'Cashier on Duty'}</span>
+              <span className="text-[10px] text-amber-400 font-mono font-bold">Role: {user?.role || 'STAFF'} • Locked</span>
             </div>
-          )}
-          <div className="text-left">
-            <span className="text-xs font-bold text-stone-200 block">{user?.name || 'Cashier on Duty'}</span>
-            <span className="text-[10px] text-amber-400 font-mono font-bold">Role: {user?.role || 'STAFF'} • Register #01</span>
           </div>
+
+          <button
+            onClick={() => void logout()}
+            className="text-[11px] font-semibold text-zinc-400 hover:text-red-400 flex items-center space-x-1"
+            title="End session & sign in as another user"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign Out</span>
+          </button>
         </div>
 
         {/* 4-Digit PIN Display */}
@@ -93,7 +115,7 @@ export const PosScreenLockModal: React.FC<Props> = ({ user, onUnlock }) => {
               <div
                 key={idx}
                 className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
-                  error
+                  errorMsg
                     ? 'bg-red-500 border-red-400 animate-pulse'
                     : pin.length > idx
                     ? 'bg-amber-400 border-amber-300 scale-125 shadow-lg shadow-amber-400/50'
@@ -102,12 +124,12 @@ export const PosScreenLockModal: React.FC<Props> = ({ user, onUnlock }) => {
               />
             ))}
           </div>
-          {error ? (
-            <p className="text-xs font-bold text-red-400 animate-bounce">
-              Incorrect PIN! Try 1234.
-            </p>
+          {errorMsg ? (
+            <p className="text-xs font-bold text-red-400">{errorMsg}</p>
           ) : (
-            <p className="text-[11px] text-stone-400">Enter PIN to unlock terminal</p>
+            <p className="text-[11px] text-stone-400">
+              {isVerifying ? 'Verifying PIN...' : 'Enter your staff or manager PIN to unlock'}
+            </p>
           )}
         </div>
 
@@ -116,34 +138,34 @@ export const PosScreenLockModal: React.FC<Props> = ({ user, onUnlock }) => {
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
             <button
               key={digit}
+              disabled={isVerifying}
               onClick={() => handleKeyPress(digit)}
-              className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 text-stone-100 font-mono text-xl font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
+              className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 disabled:opacity-50 text-stone-100 font-mono text-xl font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
             >
               {digit}
             </button>
           ))}
           <button
+            disabled={isVerifying}
             onClick={() => setPin('')}
             className="py-3.5 rounded-2xl bg-stone-950 hover:bg-stone-800 text-stone-400 font-bold text-xs uppercase"
           >
             Clear
           </button>
           <button
+            disabled={isVerifying}
             onClick={() => handleKeyPress('0')}
-            className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 text-stone-100 font-mono text-xl font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
+            className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 disabled:opacity-50 text-stone-100 font-mono text-xl font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
           >
             0
           </button>
           <button
+            disabled={isVerifying}
             onClick={handleBackspace}
             className="py-3.5 rounded-2xl bg-stone-950 hover:bg-stone-800 text-stone-400 flex items-center justify-center"
           >
             <Delete className="w-5 h-5" />
           </button>
-        </div>
-
-        <div className="text-[10px] text-stone-500 font-mono">
-          Demo Unlock PIN: <span className="text-amber-400 font-bold">1234</span>
         </div>
       </div>
     </div>

@@ -1,7 +1,22 @@
-import React, { useState } from 'react';
-import { X, Printer, CheckCircle2, AlertTriangle, FileSpreadsheet, DollarSign, Calculator } from 'lucide-react';
-import { getTotalExpensesToday } from '../../services/expenseService';
+import React, { useEffect, useState } from 'react';
+import { X, Printer, CheckCircle2, AlertTriangle, FileSpreadsheet, Calculator, Lock } from 'lucide-react';
+import { fetchExpenses, computeTodayExpenses } from '../../services/expenseService';
+import { fetchOrders, computeTodayMetricsFromOrders } from '../../services/orderService';
+import { apiFetch, ApiError } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import { soundEffects } from '../../services/soundService';
+import { showToastNotification } from '../../services/telegramBotService';
+import { StoreSettings } from '../../types';
+
+interface ShiftDTO {
+  id: string;
+  cashierName: string;
+  status: 'OPEN' | 'CLOSED';
+  startingFloat: number;
+  cashIn: number;
+  cashOut: number;
+  openedAt: string;
+}
 
 interface Props {
   onClose: () => void;
@@ -9,29 +24,129 @@ interface Props {
 }
 
 export const ZReportModal: React.FC<Props> = ({ onClose, cashierName }) => {
-  // Mock business day metrics (or calculated from orders)
-  const openingFloat = 100.00;
-  const grossSales = 1248.50;
-  const discountsGiven = 42.50;
-  const orderVoids = 18.00;
-  const vatCollected = (grossSales - discountsGiven) * 0.10;
-  const netSales = grossSales - discountsGiven + vatCollected;
+  const { hasGranularPermission } = useAuth();
+  const canManageShift = hasGranularPermission('pos:shift_manage');
 
-  const cashSales = 485.00;
-  const abaKhqrSales = 620.50;
-  const creditCardSales = 142.50;
-  const pettyCashExpenses = getTotalExpensesToday();
+  const [loading, setLoading] = useState(true);
+  const [closingShift, setClosingShift] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const expectedCashInDrawer = openingFloat + cashSales - pettyCashExpenses;
+  const [activeShift, setActiveShift] = useState<ShiftDTO | null>(null);
+  const [openingFloat, setOpeningFloat] = useState(0);
+  const [grossSales, setGrossSales] = useState(0);
+  const [discountsGiven, setDiscountsGiven] = useState(0);
+  const [orderVoids, setOrderVoids] = useState(0);
+  const [vatCollected, setVatCollected] = useState(0);
+  const [netSales, setNetSales] = useState(0);
+  const [cashSales, setCashSales] = useState(0);
+  const [abaKhqrSales, setAbaKhqrSales] = useState(0);
+  const [creditCardSales, setCreditCardSales] = useState(0);
+  const [pettyCashExpenses, setPettyCashExpenses] = useState(0);
+  const [khrRate, setKhrRate] = useState(4100);
 
-  // Actual physical cash counted by manager
-  const [actualCashUSD, setActualCashUSD] = useState<string>(expectedCashInDrawer.toFixed(2));
+  const [actualCashUSD, setActualCashUSD] = useState<string>('0.00');
   const [actualCashKHR, setActualCashKHR] = useState<string>('0');
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadData = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [orders, expenses, shiftRes, settingsRes] = await Promise.all([
+          fetchOrders({ limit: 500 }),
+          fetchExpenses(),
+          apiFetch<{ currentShift: ShiftDTO | null; recentShifts: ShiftDTO[] }>('/api/v1/finance/shifts/current'),
+          apiFetch<{ settings: StoreSettings }>('/api/v1/settings').catch(() => null),
+        ]);
+
+        if (cancelled) return;
+        const rate = settingsRes?.settings?.khrExchangeRate || 4100;
+        setKhrRate(rate);
+
+        const open = shiftRes.currentShift;
+        setActiveShift(open);
+        const shiftFloat = open ? open.startingFloat : shiftRes.recentShifts[0]?.startingFloat ?? 0;
+
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const refundedToday = orders
+          .filter((o) => o.createdAt.startsWith(todayStr) && o.isRefunded)
+          .reduce((sum, o) => sum + o.totalAmount, 0);
+
+        const metrics = computeTodayMetricsFromOrders(orders);
+        let khqrTotal = 0;
+        let cardTotal = 0;
+        for (const o of metrics.todayOrders) {
+          if (o.splitPayments && o.splitPayments.length > 0) {
+            for (const sp of o.splitPayments) {
+              if (sp.method === 'CREDIT_CARD') cardTotal += sp.amount;
+              else if (sp.method !== 'CASH') khqrTotal += sp.amount;
+            }
+          } else if (o.paymentMethod === 'CREDIT_CARD') {
+            cardTotal += o.totalAmount;
+          } else if (o.paymentMethod && o.paymentMethod !== 'CASH') {
+            khqrTotal += o.totalAmount;
+          }
+        }
+
+        const expensesToday = computeTodayExpenses(expenses, rate);
+
+        setOpeningFloat(shiftFloat);
+        setGrossSales(metrics.grossSales);
+        setDiscountsGiven(metrics.discounts);
+        setOrderVoids(refundedToday);
+        setVatCollected(metrics.taxCollected);
+        setNetSales(metrics.netSales);
+        setCashSales(metrics.cashSales);
+        setAbaKhqrSales(khqrTotal);
+        setCreditCardSales(cardTotal);
+        setPettyCashExpenses(expensesToday);
+
+        const expected = Math.max(0, shiftFloat + metrics.cashSales - expensesToday);
+        setActualCashUSD(expected.toFixed(2));
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : 'Failed to load Z-Report data');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void loadData();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const expectedCashInDrawer = openingFloat + cashSales - pettyCashExpenses;
   const countedUSD = parseFloat(actualCashUSD) || 0;
-  const countedKHRInUSD = (parseFloat(actualCashKHR) || 0) / 4100;
+  const countedKHRInUSD = (parseFloat(actualCashKHR) || 0) / khrRate;
   const totalCountedUSD = countedUSD + countedKHRInUSD;
   const cashDiscrepancy = totalCountedUSD - expectedCashInDrawer;
+
+  const handleCloseShiftAndPost = async () => {
+    if (!canManageShift || !activeShift) return;
+    if (!confirm(`Close current shift and post Z-Report with $${totalCountedUSD.toFixed(2)} counted cash?`)) {
+      return;
+    }
+
+    setClosingShift(true);
+    setError(null);
+    try {
+      await apiFetch('/api/v1/finance/shifts/close', {
+        method: 'POST',
+        body: { actualCash: Number(totalCountedUSD.toFixed(2)) },
+      });
+      setActiveShift(null);
+      window.dispatchEvent(new Event('coffee_shift_updated'));
+      soundEffects.playSuccess();
+      showToastNotification('Z-Report posted & shift closed cleanly.');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to close shift');
+    } finally {
+      setClosingShift(false);
+    }
+  };
 
   const handlePrint = () => {
     soundEffects.playBeep();
@@ -51,7 +166,9 @@ export const ZReportModal: React.FC<Props> = ({ onClose, cashierName }) => {
             </div>
             <div>
               <h3 className="text-base font-bold text-stone-100">End-of-Day Z-Report & Cash Drawer Closeout</h3>
-              <p className="text-xs text-stone-400">របាយការណ៍បិទបញ្ជីចុងថ្ងៃ និងផ្ទៀងផ្ទាត់សាច់ប្រាក់</p>
+              <p className="text-xs text-stone-400">
+                {loading ? 'Loading live SQLite ledger...' : activeShift ? `Open Shift: ${activeShift.cashierName}` : 'No Open Shift (Preview Only)'}
+              </p>
             </div>
           </div>
           <button
@@ -61,6 +178,12 @@ export const ZReportModal: React.FC<Props> = ({ onClose, cashierName }) => {
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {error && (
+          <div className="mx-6 mt-3 p-2.5 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 text-xs font-semibold">
+            {error}
+          </div>
+        )}
 
         {/* Content & Inputs */}
         <div className="p-6 max-h-[70vh] overflow-y-auto space-y-6">
@@ -89,7 +212,7 @@ export const ZReportModal: React.FC<Props> = ({ onClose, cashierName }) => {
               </div>
 
               <div>
-                <label className="text-[11px] font-semibold text-stone-400 block mb-1">Counted Cash (KHR ៛)</label>
+                <label className="text-[11px] font-semibold text-stone-400 block mb-1">Counted Cash (KHR ៛ @ {khrRate})</label>
                 <input
                   type="number"
                   step="100"
@@ -239,7 +362,7 @@ export const ZReportModal: React.FC<Props> = ({ onClose, cashierName }) => {
         </div>
 
         {/* Action Buttons */}
-        <div className="p-4 bg-stone-950 border-t border-stone-800 flex items-center justify-between">
+        <div className="p-4 bg-stone-950 border-t border-stone-800 flex items-center justify-between gap-2">
           <button
             onClick={onClose}
             className="px-4 py-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-bold"
@@ -247,13 +370,27 @@ export const ZReportModal: React.FC<Props> = ({ onClose, cashierName }) => {
             Close
           </button>
 
-          <button
-            onClick={handlePrint}
-            className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-2 shadow-lg shadow-amber-900/40"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Print Official Z-Report (80mm)</span>
-          </button>
+          <div className="flex items-center space-x-2">
+            {canManageShift && activeShift && (
+              <button
+                type="button"
+                disabled={closingShift}
+                onClick={() => void handleCloseShiftAndPost()}
+                className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-bold text-xs flex items-center space-x-1.5 shadow-lg"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>{closingShift ? 'Closing...' : 'Close Shift & Post Z-Report'}</span>
+              </button>
+            )}
+
+            <button
+              onClick={handlePrint}
+              className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-2 shadow-lg shadow-amber-900/40"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Print Official Z-Report (80mm)</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -1,18 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  X, Search, RotateCcw, Printer, Tag, CheckCircle2, AlertTriangle, 
-  Calendar, Clock, User, DollarSign, Layers, ShieldCheck, Filter, ArrowRightLeft
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  X, Search, RotateCcw, Printer, Tag, CheckCircle2, AlertTriangle,
+  Clock, Filter
 } from 'lucide-react';
 import { Order } from '../../types';
-import { getOrders, refundOrder } from '../../services/orderService';
-import { logSecurityEvent } from '../../services/securityAuditService';
+import { fetchOrders, refundOrderApi } from '../../services/orderService';
 import { soundEffects } from '../../services/soundService';
+import { useAuth } from '../../context/AuthContext';
 
 interface Props {
   onClose: () => void;
   onReprintReceipt: (order: Order) => void;
   onPrintCupLabels: (order: Order) => void;
-  onRequestManagerPin: (action: { title: string; details: string; onApproved: () => void }) => void;
+  onRequestManagerPin: (action: { title: string; details: string; onApproved: (overrideToken?: string) => void }) => void;
 }
 
 export const OrderHistoryModal: React.FC<Props> = ({
@@ -21,19 +21,34 @@ export const OrderHistoryModal: React.FC<Props> = ({
   onPrintCupLabels,
   onRequestManagerPin,
 }) => {
-  const [orders, setOrders] = useState<Order[]>(() => getOrders());
+  const { hasGranularPermission } = useAuth();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'COMPLETED' | 'CANCELLED'>('ALL');
 
+  const loadOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await fetchOrders({ limit: 200 });
+      setOrders(list);
+    } catch (err) {
+      console.error('Failed to load order history:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    const handleUpdate = () => setOrders(getOrders());
+    void loadOrders();
+    const handleUpdate = () => { void loadOrders(); };
     window.addEventListener('coffee_order_created', handleUpdate);
     window.addEventListener('coffee_order_refunded', handleUpdate);
     return () => {
       window.removeEventListener('coffee_order_created', handleUpdate);
       window.removeEventListener('coffee_order_refunded', handleUpdate);
     };
-  }, []);
+  }, [loadOrders]);
 
   const filteredOrders = orders.filter((o) => {
     const matchesSearch =
@@ -50,28 +65,36 @@ export const OrderHistoryModal: React.FC<Props> = ({
     return matchesSearch && matchesStatus;
   });
 
+  const executeRefund = async (order: Order, overrideToken?: string) => {
+    const reason = prompt(
+      'Please enter reason for refund (មូលហេតុនៃការសងលុយ):',
+      'Customer requested drink change'
+    );
+    if (!reason || reason.trim().length < 2) return;
+
+    try {
+      await refundOrderApi(order.id, reason.trim(), overrideToken);
+      soundEffects.playCashRegister();
+      await loadOrders();
+      alert(`Order #${order.orderNumber} has been successfully refunded and marked as Cancelled.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to process refund');
+    }
+  };
+
   const handleRefundClick = (order: Order) => {
     if (order.isRefunded) return;
+
+    if (hasGranularPermission('pos:void')) {
+      void executeRefund(order);
+      return;
+    }
 
     onRequestManagerPin({
       title: `Refund Order #${order.orderNumber} (សងប្រាក់វិក្កយបត្រ)`,
       details: `Full refund for $${order.totalAmount.toFixed(2)} (${order.items.length} items). Requires Manager PIN authorization.`,
-      onApproved: () => {
-        const reason = prompt('Please enter reason for refund (មូលហេតុនៃការសងលុយ):', 'Customer requested drink change') || 'Store Manager Override';
-        const success = refundOrder(order.id, reason, 'Manager');
-        if (success) {
-          soundEffects.playCashRegister();
-          logSecurityEvent(
-            'ORDER_VOID',
-            'Order Refund / Voided',
-            `Refunded #${order.orderNumber} for $${order.totalAmount.toFixed(2)} - Reason: ${reason}`,
-            order.cashierName,
-            'Manager (PIN: 1234)',
-            'CRITICAL'
-          );
-          setOrders(getOrders());
-          alert(`Order #${order.orderNumber} has been successfully refunded and marked as Cancelled.`);
-        }
+      onApproved: (overrideToken) => {
+        void executeRefund(order, overrideToken);
       },
     });
   };

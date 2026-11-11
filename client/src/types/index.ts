@@ -1,5 +1,20 @@
 export type Role = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'BARISTA';
 
+export const ALL_PERMISSIONS = [
+  'pos:access',
+  'pos:discount',
+  'pos:void',
+  'pos:shift_manage',
+  'inventory:view',
+  'inventory:edit',
+  'reports:view',
+  'reports:export',
+  'staff:manage',
+  'settings:edit',
+] as const;
+
+export type PermissionId = (typeof ALL_PERMISSIONS)[number];
+
 export type Currency = 'USD' | 'KHR' | 'EUR' | 'GBP' | 'THB' | 'CNY' | 'JPY' | 'SGD';
 
 export interface GlobalBranch {
@@ -20,6 +35,10 @@ export interface User {
   role: Role;
   avatar?: string;
   phone?: string;
+  shift?: 'Morning' | 'Afternoon' | 'Evening';
+  status?: 'Active' | 'On Leave' | 'Inactive';
+  permissions?: PermissionId[];
+  salesCount?: number;
 }
 
 export interface Category {
@@ -102,6 +121,7 @@ export interface Order {
   splitPayments?: SplitPayment[];
   amountPaid?: number;
   changeAmount?: number;
+  transactionId?: string;
   createdAt: string;
   notes?: string;
   isRefunded?: boolean;
@@ -137,7 +157,7 @@ export interface Customer {
 export interface Ingredient {
   id: string;
   name: string;
-  unit: 'g' | 'ml' | 'pcs' | 'kg';
+  unit: 'g' | 'ml' | 'pcs' | 'kg' | 'l' | 'shots';
   currentStock: number;
   minStockAlert: number;
   costPerUnit: number;
@@ -153,5 +173,27 @@ export interface StaffMember {
   phone: string;
   status: 'Active' | 'On Leave' | 'Inactive';
   shift: 'Morning' | 'Afternoon' | 'Evening';
+  avatar?: string;
   salesCount: number;
+  customPermissions?: PermissionId[] | null;
+  permissions?: PermissionId[];
+}
+
+export interface RoleConfigDTO {
+  role: Role;
+  notes: string;
+  permissions: PermissionId[];
+  updatedAt?: string;
+}
+
+export interface StoreSettings {
+  shopName: string;
+  address: string;
+  phone: string;
+  taxRate: number;
+  khrExchangeRate: number;
+  telegramEnabled?: boolean;
+  telegramChatId?: string;
+  hasTelegramBotToken?: boolean;
+  botTokenMasked?: string;
 }

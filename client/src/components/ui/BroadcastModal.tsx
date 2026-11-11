@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
-import { X, Megaphone, Plus, Trash2, CheckCircle, AlertTriangle, Send } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { X, Megaphone, CheckCircle, Send, EyeOff } from 'lucide-react';
 import {
   BroadcastMessage,
-  getBroadcasts,
-  addBroadcast,
-  setActiveBroadcast,
-  toggleBroadcast,
+  fetchBroadcasts,
+  createBroadcastApi,
+  clearActiveBroadcastApi,
 } from '../../services/broadcastService';
+import { ApiError } from '../../services/api';
 import { soundEffects } from '../../services/soundService';
 
 interface Props {
@@ -14,27 +14,85 @@ interface Props {
   authorName: string;
 }
 
-export const BroadcastModal: React.FC<Props> = ({ onClose, authorName }) => {
-  const [broadcasts, setBroadcasts] = useState<BroadcastMessage[]>(() => getBroadcasts());
+export const BroadcastModal: React.FC<Props> = ({ onClose }) => {
+  const [broadcasts, setBroadcasts] = useState<BroadcastMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [messageKh, setMessageKh] = useState('');
   const [messageEn, setMessageEn] = useState('');
-  const [priority, setPriority] = useState<'NORMAL' | 'HIGH' | 'URGENT'>('NORMAL');
+  const [priority, setPriority] = useState<'NORMAL' | 'URGENT'>('NORMAL');
 
-  const handlePost = (e: React.FormEvent) => {
+  const loadBroadcasts = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await fetchBroadcasts();
+      setBroadcasts(list);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load broadcasts');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadBroadcasts();
+  }, []);
+
+  const handlePost = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!messageKh.trim()) return;
 
-    soundEffects.playSuccess();
-    const created = addBroadcast(messageKh, messageEn || messageKh, priority, authorName);
-    setBroadcasts(getBroadcasts());
-    setMessageKh('');
-    setMessageEn('');
+    setSubmitting(true);
+    setError(null);
+    try {
+      const created = await createBroadcastApi(
+        messageKh.trim(),
+        messageEn.trim() || messageKh.trim(),
+        priority
+      );
+      soundEffects.playSuccess();
+      setBroadcasts((prev) => [created, ...prev.map((b) => ({ ...b, isActive: false }))]);
+      setMessageKh('');
+      setMessageEn('');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to publish broadcast');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  const handleActivate = (id: string) => {
-    soundEffects.playBeep();
-    setActiveBroadcast(id);
-    setBroadcasts(getBroadcasts());
+  const handleActivate = async (b: BroadcastMessage) => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const created = await createBroadcastApi(
+        b.messageKh,
+        b.messageEn || b.messageKh,
+        b.priority === 'URGENT' ? 'URGENT' : 'NORMAL'
+      );
+      soundEffects.playBeep();
+      setBroadcasts((prev) => [created, ...prev.map((item) => ({ ...item, isActive: false }))]);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to activate broadcast');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleClearBanner = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await clearActiveBroadcastApi();
+      setBroadcasts((prev) => prev.map((b) => ({ ...b, isActive: false })));
+      soundEffects.playBeep();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to clear active banner');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -53,7 +111,7 @@ export const BroadcastModal: React.FC<Props> = ({ onClose, authorName }) => {
                   សេចក្តីជូនដំណឹង
                 </span>
               </h2>
-              <p className="text-xs text-stone-400">Real-time ticker banner across all POS & KDS terminal screens</p>
+              <p className="text-xs text-stone-400">SQLite synced ticker banner across all POS & KDS terminals</p>
             </div>
           </div>
           <button
@@ -64,8 +122,14 @@ export const BroadcastModal: React.FC<Props> = ({ onClose, authorName }) => {
           </button>
         </div>
 
+        {error && (
+          <div className="mx-6 mt-3 p-2.5 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 text-xs font-semibold">
+            {error}
+          </div>
+        )}
+
         {/* Post Form */}
-        <form onSubmit={handlePost} className="p-6 bg-stone-950/40 border-b border-stone-800/80 space-y-3">
+        <form onSubmit={(e) => void handlePost(e)} className="p-6 bg-stone-950/40 border-b border-stone-800/80 space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center space-x-1.5">
             <Send className="w-3.5 h-3.5" />
             <span>ផ្សាយដំណឹងថ្មី (Broadcast New Notice)</span>
@@ -92,7 +156,7 @@ export const BroadcastModal: React.FC<Props> = ({ onClose, authorName }) => {
           <div className="flex items-center justify-between pt-1">
             <div className="flex items-center space-x-2">
               <span className="text-xs text-stone-400">កម្រិតអាទិភាព (Priority):</span>
-              {(['NORMAL', 'HIGH', 'URGENT'] as const).map((p) => (
+              {(['NORMAL', 'URGENT'] as const).map((p) => (
                 <button
                   type="button"
                   key={p}
@@ -101,8 +165,6 @@ export const BroadcastModal: React.FC<Props> = ({ onClose, authorName }) => {
                     priority === p
                       ? p === 'URGENT'
                         ? 'bg-red-600 text-white shadow-md'
-                        : p === 'HIGH'
-                        ? 'bg-amber-600 text-stone-950 shadow-md'
                         : 'bg-stone-700 text-stone-100'
                       : 'bg-stone-900 text-stone-400 border border-stone-800 hover:bg-stone-800'
                   }`}
@@ -114,64 +176,85 @@ export const BroadcastModal: React.FC<Props> = ({ onClose, authorName }) => {
 
             <button
               type="submit"
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-900/30 transition-all"
+              disabled={submitting}
+              className="px-4 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:opacity-50 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-900/30 transition-all"
             >
               <Megaphone className="w-3.5 h-3.5" />
-              <span>ផ្សាយដំណឹង (Publish)</span>
+              <span>{submitting ? 'Publishing...' : 'ផ្សាយដំណឹង (Publish)'}</span>
             </button>
           </div>
         </form>
 
         {/* Existing Broadcast History */}
         <div className="p-6 max-h-[40vh] overflow-y-auto space-y-2.5">
-          <div className="text-xs font-semibold text-stone-400">ប្រវត្តិសេចក្តីជូនដំណឹង (Notice History)</div>
-          {broadcasts.map((b) => (
-            <div
-              key={b.id}
-              className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all ${
-                b.isActive
-                  ? 'bg-stone-900 border-amber-600/50 shadow-md'
-                  : 'bg-stone-950/60 border-stone-800/70 opacity-70'
-              }`}
-            >
-              <div className="space-y-1 flex-1 pr-3">
-                <div className="flex items-center space-x-2">
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                      b.priority === 'URGENT'
-                        ? 'bg-red-600 text-white'
-                        : b.priority === 'HIGH'
-                        ? 'bg-amber-600 text-stone-950'
-                        : 'bg-stone-800 text-stone-300'
-                    }`}
-                  >
-                    {b.priority}
-                  </span>
-                  <span className="text-[10px] text-stone-500">
-                    {new Date(b.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • By {b.author}
-                  </span>
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold text-stone-400">ប្រវត្តិសេចក្តីជូនដំណឹង (Notice History)</div>
+            {broadcasts.some((b) => b.isActive) && (
+              <button
+                type="button"
+                onClick={() => void handleClearBanner()}
+                disabled={submitting}
+                className="text-[11px] font-bold text-stone-400 hover:text-amber-300 flex items-center space-x-1"
+              >
+                <EyeOff className="w-3.5 h-3.5" />
+                <span>Hide Active Banner</span>
+              </button>
+            )}
+          </div>
+          {loading ? (
+            <div className="py-8 text-center text-stone-500 text-xs">Loading notices...</div>
+          ) : broadcasts.length === 0 ? (
+            <div className="py-8 text-center text-stone-500 text-xs">No notices published yet.</div>
+          ) : (
+            broadcasts.map((b) => (
+              <div
+                key={b.id}
+                className={`p-3.5 rounded-2xl border flex items-center justify-between transition-all ${
+                  b.isActive
+                    ? 'bg-stone-900 border-amber-600/50 shadow-md'
+                    : 'bg-stone-950/60 border-stone-800/70 opacity-70'
+                }`}
+              >
+                <div className="space-y-1 flex-1 pr-3">
+                  <div className="flex items-center space-x-2">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        b.priority === 'URGENT'
+                          ? 'bg-red-600 text-white'
+                          : b.priority === 'HIGH'
+                          ? 'bg-amber-600 text-stone-950'
+                          : 'bg-stone-800 text-stone-300'
+                      }`}
+                    >
+                      {b.priority}
+                    </span>
+                    <span className="text-[10px] text-stone-500">
+                      {new Date(b.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • By {b.author}
+                    </span>
+                  </div>
+                  <p className="text-xs text-stone-200 font-medium">{b.messageKh}</p>
+                  {b.messageEn && <p className="text-[11px] text-stone-400">{b.messageEn}</p>}
                 </div>
-                <p className="text-xs text-stone-200 font-medium">{b.messageKh}</p>
-                {b.messageEn && <p className="text-[11px] text-stone-400">{b.messageEn}</p>}
-              </div>
 
-              <div>
-                {b.isActive ? (
-                  <span className="px-2.5 py-1 rounded-xl bg-emerald-950 text-emerald-400 border border-emerald-600/40 text-[11px] font-bold flex items-center space-x-1">
-                    <CheckCircle className="w-3 h-3" />
-                    <span>កំពុងផ្សាយ (Active)</span>
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => handleActivate(b.id)}
-                    className="px-2.5 py-1 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-[11px] font-semibold transition-colors"
-                  >
-                    ផ្សាយសារនេះ (Activate)
-                  </button>
-                )}
+                <div>
+                  {b.isActive ? (
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-950 text-emerald-400 border border-emerald-600/40 text-[11px] font-bold flex items-center space-x-1">
+                      <CheckCircle className="w-3 h-3" />
+                      <span>កំពុងផ្សាយ (Active)</span>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => void handleActivate(b)}
+                      disabled={submitting}
+                      className="px-2.5 py-1 rounded-xl bg-stone-800 hover:bg-stone-700 disabled:opacity-50 text-stone-300 text-[11px] font-semibold transition-colors"
+                    >
+                      ផ្សាយសារនេះ (Activate)
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
         {/* Footer */}

@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
-import { Settings, Store, Receipt, Printer, Save, Check, Send, Bot, HelpCircle } from 'lucide-react';
-import { getTelegramConfig, saveTelegramConfig, TelegramConfig, sendTelegramSaleAlert } from '../services/telegramBotService';
+import React, { useState, useEffect } from 'react';
+import { Settings, Store, Receipt, Save, Check, Send, Bot, HelpCircle, Lock, Trash2, AlertTriangle } from 'lucide-react';
+import { apiFetch } from '../services/api';
+import { sendTelegramTestAlert, showToastNotification } from '../services/telegramBotService';
+import { StoreSettings } from '../types';
 
 export const SettingsPage: React.FC = () => {
   const [shopName, setShopName] = useState('Aura Coffee Shop');
@@ -9,44 +11,103 @@ export const SettingsPage: React.FC = () => {
   const [taxRate, setTaxRate] = useState(10);
   const [khrExchangeRate, setKhrExchangeRate] = useState(4100);
 
-  // Telegram Config State
-  const [telegramConfig, setTelegramConfigState] = useState<TelegramConfig>(getTelegramConfig());
-  const [isSaved, setIsSaved] = useState(false);
+  // Server-encrypted Telegram config
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [newBotToken, setNewBotToken] = useState('');
+  const [hasSavedToken, setHasSavedToken] = useState(false);
+  const [botTokenMasked, setBotTokenMasked] = useState('');
 
-  const handleSave = () => {
-    saveTelegramConfig(telegramConfig);
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2000);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await apiFetch<{ settings: StoreSettings }>('/api/v1/settings');
+        if (!active) return;
+        const s = res.settings;
+        setShopName(s.shopName);
+        setAddress(s.address);
+        setPhone(s.phone);
+        setTaxRate(s.taxRate);
+        setKhrExchangeRate(s.khrExchangeRate);
+        setTelegramEnabled(Boolean(s.telegramEnabled));
+        setTelegramChatId(s.telegramChatId || '');
+        setHasSavedToken(Boolean(s.hasTelegramBotToken));
+        setBotTokenMasked(s.botTokenMasked || '');
+      } catch (err) {
+        if (active) {
+          setErrorMsg(err instanceof Error ? err.message : 'Failed to load settings');
+        }
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    setErrorMsg('');
+    setIsSaving(true);
+    try {
+      const payload: Record<string, unknown> = {
+        shopName,
+        address,
+        phone,
+        taxRate: Number(taxRate),
+        khrExchangeRate: Math.round(Number(khrExchangeRate)),
+        telegramEnabled,
+        telegramChatId,
+      };
+      if (newBotToken.trim()) {
+        payload.telegramBotToken = newBotToken.trim();
+      }
+      const res = await apiFetch<{ settings: StoreSettings }>('/api/v1/settings', {
+        method: 'PUT',
+        body: payload,
+      });
+      setHasSavedToken(Boolean(res.settings.hasTelegramBotToken));
+      setBotTokenMasked(res.settings.botTokenMasked || '');
+      setNewBotToken('');
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2500);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to update settings');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleTestTelegramAlert = () => {
-    sendTelegramSaleAlert({
-      id: 'test-ord',
-      orderNumber: 'ORD-TEST-888',
-      type: 'DINE_IN',
-      status: 'COMPLETED',
-      cashierName: 'Sophia Chen',
-      items: [
-        {
-          cartItemId: '1',
-          productId: '1',
-          name: 'Caramel Macchiato',
-          image: '',
-          selectedVariant: { id: 'v1', name: 'Large', priceOffset: 0.75 },
-          selectedToppings: [{ id: 't1', name: 'Oat Milk', price: 0.60 }],
-          unitPrice: 5.60,
-          quantity: 2,
-          itemSubtotal: 11.20,
-        },
-      ],
-      subtotal: 11.20,
-      discountAmount: 0,
-      taxAmount: 1.12,
-      serviceCharge: 0,
-      totalAmount: 12.32,
-      paymentMethod: 'ABA_KHQR',
-      createdAt: new Date().toISOString(),
-    });
+  const handleClearToken = async () => {
+    setErrorMsg('');
+    try {
+      const res = await apiFetch<{ settings: StoreSettings }>('/api/v1/settings', {
+        method: 'PUT',
+        body: { clearTelegramBotToken: true },
+      });
+      setHasSavedToken(Boolean(res.settings.hasTelegramBotToken));
+      setBotTokenMasked('');
+      setNewBotToken('');
+      showToastNotification('Cleared saved Telegram Bot Token from encrypted vault.');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to clear token');
+    }
+  };
+
+  const handleTestTelegramAlert = async () => {
+    setErrorMsg('');
+    try {
+      await sendTelegramTestAlert();
+      showToastNotification('Telegram Bot test alert sent securely from server!');
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Telegram test failed');
+    }
   };
 
   return (
@@ -59,18 +120,26 @@ export const SettingsPage: React.FC = () => {
           </div>
           <div>
             <h2 className="text-xl font-bold text-stone-100">POS & Store Settings</h2>
-            <p className="text-xs text-stone-400">Configure café metadata, taxes, Telegram alerts & receipt templates</p>
+            <p className="text-xs text-stone-400">Encrypted store secrets, authoritative tax/exchange rates & Telegram bot</p>
           </div>
         </div>
 
         <button
-          onClick={handleSave}
-          className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-1.5 transition-colors shadow-lg shadow-amber-900/30"
+          onClick={() => void handleSave()}
+          disabled={isLoading || isSaving}
+          className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-60 text-stone-950 font-bold text-xs flex items-center space-x-1.5 transition-colors shadow-lg shadow-amber-900/30"
         >
           {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-          <span>{isSaved ? 'Settings Saved!' : 'Save Configuration'}</span>
+          <span>{isSaving ? 'Saving...' : isSaved ? 'Settings Saved!' : 'Save Configuration'}</span>
         </button>
       </div>
+
+      {errorMsg && (
+        <div className="p-3.5 rounded-2xl bg-red-950/60 border border-red-500/50 text-red-300 text-xs flex items-center space-x-2">
+          <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+          <span className="font-semibold">{errorMsg}</span>
+        </div>
+      )}
 
       {/* Form sections */}
       <div className="space-y-6">
@@ -79,50 +148,69 @@ export const SettingsPage: React.FC = () => {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2 text-amber-400 font-bold text-sm">
               <Bot className="w-5 h-5 text-amber-400" />
-              <span>Telegram Bot Real-Time Sales Notification Alerts</span>
+              <span>Telegram Bot Server-Side Sales Alerts</span>
+              <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-[10px] text-emerald-300 font-mono">
+                <Lock className="w-3 h-3" />
+                <span>AES-256-GCM Encrypted</span>
+              </span>
             </div>
             <label className="flex items-center cursor-pointer">
               <input
                 type="checkbox"
-                checked={telegramConfig.isEnabled}
-                onChange={(e) => setTelegramConfigState({ ...telegramConfig, isEnabled: e.target.checked })}
+                checked={telegramEnabled}
+                onChange={(e) => setTelegramEnabled(e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-stone-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 relative"></div>
+              <div className="w-11 h-6 bg-stone-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-600 relative" />
             </label>
           </div>
 
-          {/* Quick instructions box */}
           <div className="p-3.5 bg-stone-950 border border-stone-800 rounded-2xl text-xs space-y-1.5 text-stone-300">
             <div className="font-bold text-amber-400 flex items-center space-x-1">
               <HelpCircle className="w-4 h-4" />
-              <span>How to connect your Telegram Bot (1 Minute Setup):</span>
+              <span>Server Vault Security:</span>
             </div>
-            <ol className="list-decimal pl-5 space-y-1 text-stone-400">
-              <li>Open Telegram, search for <b>@BotFather</b> and type <code>/newbot</code> to get your <b>Bot Token</b>.</li>
-              <li>Add your new Bot to your Telegram group/channel.</li>
-              <li>Send any message in your group, then search for <b>@userinfobot</b> to get your <b>Chat ID</b> (e.g., <code>-1001234567890</code>).</li>
-              <li>Paste the Bot Token & Chat ID below and click <b>Save Configuration</b>!</li>
-            </ol>
+            <p className="text-stone-400">
+              Your Telegram Bot Token from <b>@BotFather</b> is encrypted at rest on the backend with AES-256-GCM and is never exposed back to the browser. All Telegram dispatches execute server-side upon checkout.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="text-xs font-semibold text-stone-400 block mb-1">Telegram Bot Token</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-stone-400">
+                  {hasSavedToken ? `Replace Bot Token (Saved: ${botTokenMasked})` : 'Telegram Bot Token'}
+                </label>
+                {hasSavedToken && (
+                  <button
+                    type="button"
+                    onClick={() => void handleClearToken()}
+                    className="text-[10px] text-red-400 hover:text-red-300 font-bold flex items-center space-x-1"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>Clear Token</span>
+                  </button>
+                )}
+              </div>
               <input
-                type="text"
-                value={telegramConfig.botToken}
-                onChange={(e) => setTelegramConfigState({ ...telegramConfig, botToken: e.target.value })}
+                type="password"
+                autoComplete="off"
+                value={newBotToken}
+                onChange={(e) => setNewBotToken(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl glass-input text-stone-100 text-xs font-mono focus:outline-none"
-                placeholder="Paste Token from @BotFather (e.g. 7123456789:AAFx...)"
+                placeholder={
+                  hasSavedToken
+                    ? `Encrypted (${botTokenMasked}) — leave blank to keep`
+                    : 'Paste Token from @BotFather'
+                }
               />
             </div>
             <div>
               <label className="text-xs font-semibold text-stone-400 block mb-1">Telegram Chat ID / Group ID</label>
               <input
                 type="text"
-                value={telegramConfig.chatId}
-                onChange={(e) => setTelegramConfigState({ ...telegramConfig, chatId: e.target.value })}
+                value={telegramChatId}
+                onChange={(e) => setTelegramChatId(e.target.value)}
                 className="w-full px-4 py-2.5 rounded-xl glass-input text-stone-100 text-xs font-mono focus:outline-none"
                 placeholder="Paste Chat ID (e.g. -1001234567890)"
               />
@@ -131,11 +219,12 @@ export const SettingsPage: React.FC = () => {
 
           <div className="pt-2 flex justify-end space-x-3">
             <button
-              onClick={handleTestTelegramAlert}
+              type="button"
+              onClick={() => void handleTestTelegramAlert()}
               className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-2 shadow-lg"
             >
               <Send className="w-3.5 h-3.5" />
-              <span>Send Test Telegram Sale Alert</span>
+              <span>Send Test Telegram Alert</span>
             </button>
           </div>
         </div>
@@ -182,7 +271,7 @@ export const SettingsPage: React.FC = () => {
         <div className="p-6 rounded-3xl bg-stone-900/80 border border-stone-800 glass-panel space-y-4">
           <div className="flex items-center space-x-2 text-amber-400 font-bold text-sm">
             <Receipt className="w-4 h-4" />
-            <span>Tax & Exchange Rates</span>
+            <span>Authoritative Tax & Exchange Rates</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

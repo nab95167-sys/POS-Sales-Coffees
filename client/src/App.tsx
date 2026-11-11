@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Coffee } from 'lucide-react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LanguageProvider } from './context/LanguageContext';
 import { ProductProvider } from './context/ProductContext';
@@ -15,22 +16,58 @@ import { CustomersPage } from './pages/CustomersPage';
 import { EmployeesPage } from './pages/EmployeesPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { PermissionId, Role } from './types';
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: string[] }> = ({
-  children,
-  allowedRoles,
-}) => {
-  const { isAuthenticated, user } = useAuth();
+function getHomePathForRole(role?: Role): string {
+  if (role === 'BARISTA') return '/kds';
+  if (role === 'CASHIER') return '/pos';
+  return '/';
+}
 
-  if (!isAuthenticated) {
+const AuthSplash: React.FC = () => (
+  <div className="min-h-screen bg-[#09090b] flex flex-col items-center justify-center space-y-4 text-zinc-300 font-sans">
+    <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center shadow-lg shadow-amber-500/20 animate-pulse">
+      <Coffee className="w-7 h-7 text-zinc-950 stroke-[2.5]" />
+    </div>
+    <p className="text-xs font-bold tracking-widest uppercase text-amber-400">
+      Verifying Security Session...
+    </p>
+  </div>
+);
+
+const ProtectedRoute: React.FC<{
+  children: React.ReactNode;
+  allowedRoles?: Role[];
+  requiredPermission?: PermissionId;
+}> = ({ children, allowedRoles, requiredPermission }) => {
+  const { isAuthenticated, isLoading, user, hasGranularPermission } = useAuth();
+
+  if (isLoading) {
+    return <AuthSplash />;
+  }
+
+  if (!isAuthenticated || !user) {
     return <Navigate to="/login" replace />;
   }
 
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
-    return <Navigate to="/pos" replace />;
+  if (allowedRoles && !allowedRoles.includes(user.role)) {
+    return <Navigate to={getHomePathForRole(user.role)} replace />;
+  }
+
+  if (requiredPermission && !hasGranularPermission(requiredPermission)) {
+    return <Navigate to={getHomePathForRole(user.role)} replace />;
   }
 
   return <Layout>{children}</Layout>;
+};
+
+const LoginRoute: React.FC = () => {
+  const { isAuthenticated, isLoading, user } = useAuth();
+  if (isLoading) return <AuthSplash />;
+  if (isAuthenticated && user) {
+    return <Navigate to={getHomePathForRole(user.role)} replace />;
+  }
+  return <Login />;
 };
 
 export const App: React.FC = () => {
@@ -40,7 +77,7 @@ export const App: React.FC = () => {
         <ProductProvider>
           <BrowserRouter>
             <Routes>
-              <Route path="/login" element={<Login />} />
+              <Route path="/login" element={<LoginRoute />} />
 
               <Route
                 path="/"
@@ -54,7 +91,7 @@ export const App: React.FC = () => {
               <Route
                 path="/pos"
                 element={
-                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermission="pos:access">
                     <PosPage />
                   </ProtectedRoute>
                 }
@@ -63,7 +100,7 @@ export const App: React.FC = () => {
               <Route
                 path="/kds"
                 element={
-                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'BARISTA', 'CASHIER']}>
+                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'BARISTA', 'CASHIER']} requiredPermission="pos:access">
                     <KdsPage />
                   </ProtectedRoute>
                 }
@@ -72,7 +109,7 @@ export const App: React.FC = () => {
               <Route
                 path="/tables"
                 element={
-                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'CASHIER']}>
+                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER', 'CASHIER']} requiredPermission="pos:access">
                     <TablesPage />
                   </ProtectedRoute>
                 }
@@ -90,7 +127,7 @@ export const App: React.FC = () => {
               <Route
                 path="/inventory"
                 element={
-                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER']}>
+                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER']} requiredPermission="inventory:view">
                     <InventoryPage />
                   </ProtectedRoute>
                 }
@@ -117,7 +154,7 @@ export const App: React.FC = () => {
               <Route
                 path="/reports"
                 element={
-                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER']}>
+                  <ProtectedRoute allowedRoles={['ADMIN', 'MANAGER']} requiredPermission="reports:view">
                     <ReportsPage />
                   </ProtectedRoute>
                 }
@@ -126,7 +163,7 @@ export const App: React.FC = () => {
               <Route
                 path="/settings"
                 element={
-                  <ProtectedRoute allowedRoles={['ADMIN']}>
+                  <ProtectedRoute allowedRoles={['ADMIN']} requiredPermission="settings:edit">
                     <SettingsPage />
                   </ProtectedRoute>
                 }

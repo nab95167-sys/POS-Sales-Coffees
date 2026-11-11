@@ -1,3 +1,8 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
 # Build and Cache
 dist
 dist-ssr
@@ -6,10 +11,21 @@ server/dist
 .vite
 client/node_modules/.vite
 
+# Runtime Database & Auto-generated Dev Secrets
+server/data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+.dev-secrets.json
+
 # Environment and sensitive keys
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!server/.env.example
+!client/.env.example
 
 # Logs
 *.log

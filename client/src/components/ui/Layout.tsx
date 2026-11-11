@@ -1,29 +1,58 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { 
-  Coffee, LayoutDashboard, ShoppingBag, UtensilsCrossed, 
-  Layers, Package, Users, ShieldAlert, BarChart3, Settings, 
-  LogOut, Clock, RefreshCw, UserCheck, Shield, Globe, MapPin, ChevronDown, Command, Search
+import {
+  Coffee,
+  LayoutDashboard,
+  ShoppingBag,
+  UtensilsCrossed,
+  Layers,
+  Package,
+  Users,
+  ShieldAlert,
+  BarChart3,
+  Settings,
+  LogOut,
+  Clock,
+  Shield,
+  Globe,
+  ChevronDown,
+  Search,
+  KeyRound,
+  X,
+  Check,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage, Language } from '../../context/LanguageContext';
 import { WORLDWIDE_BRANCHES } from '../../services/worldwideBranches';
-import { GlobalBranch, Role } from '../../types';
+import { apiFetch } from '../../services/api';
+import { GlobalBranch, PermissionId, Role } from '../../types';
 import { CommandPalette } from './CommandPalette';
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, logout, switchDemoRole } = useAuth();
+  const { user, logout, hasGranularPermission } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(new Date());
-  const [showRoleSelector, setShowRoleSelector] = useState(false);
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  
+
+  // Change Password / PIN Modal state
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [secTab, setSecTab] = useState<'password' | 'pin'>('pin');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [secFeedback, setSecFeedback] = useState<{ type: 'ok' | 'err'; msg: string } | null>(null);
+  const [secBusy, setSecBusy] = useState(false);
+
   const [activeBranch, setActiveBranch] = useState<GlobalBranch>(() => {
-    const saved = localStorage.getItem('coffee_pos_active_branch');
-    return saved ? JSON.parse(saved) : WORLDWIDE_BRANCHES[0];
+    try {
+      const saved = localStorage.getItem('coffee_pos_active_branch');
+      return saved ? JSON.parse(saved) : WORLDWIDE_BRANCHES[0];
+    } catch {
+      return WORLDWIDE_BRANCHES[0];
+    }
   });
 
   useEffect(() => {
@@ -37,22 +66,55 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
     setShowBranchSelector(false);
   };
 
-  const navigation = [
-    { name: t('posScreen'), path: '/pos', icon: ShoppingBag, roles: ['ADMIN', 'MANAGER', 'CASHIER'] },
-    { name: t('kitchenKds'), path: '/kds', icon: UtensilsCrossed, roles: ['ADMIN', 'MANAGER', 'BARISTA', 'CASHIER'] },
-    { name: t('tables'), path: '/tables', icon: Layers, roles: ['ADMIN', 'MANAGER', 'CASHIER'] },
+  const navigation: Array<{
+    name: string;
+    path: string;
+    icon: React.ComponentType<{ className?: string }>;
+    roles: Role[];
+    perm?: PermissionId;
+  }> = [
+    { name: t('posScreen'), path: '/pos', icon: ShoppingBag, roles: ['ADMIN', 'MANAGER', 'CASHIER'], perm: 'pos:access' },
+    { name: t('kitchenKds'), path: '/kds', icon: UtensilsCrossed, roles: ['ADMIN', 'MANAGER', 'BARISTA', 'CASHIER'], perm: 'pos:access' },
+    { name: t('tables'), path: '/tables', icon: Layers, roles: ['ADMIN', 'MANAGER', 'CASHIER'], perm: 'pos:access' },
     { name: t('dashboard'), path: '/', icon: LayoutDashboard, roles: ['ADMIN', 'MANAGER'] },
     { name: t('products'), path: '/products', icon: Coffee, roles: ['ADMIN', 'MANAGER'] },
-    { name: t('inventory'), path: '/inventory', icon: Package, roles: ['ADMIN', 'MANAGER'] },
+    { name: t('inventory'), path: '/inventory', icon: Package, roles: ['ADMIN', 'MANAGER'], perm: 'inventory:view' },
     { name: t('customers'), path: '/customers', icon: Users, roles: ['ADMIN', 'MANAGER', 'CASHIER'] },
     { name: t('staff'), path: '/employees', icon: ShieldAlert, roles: ['ADMIN', 'MANAGER'] },
-    { name: t('reports'), path: '/reports', icon: BarChart3, roles: ['ADMIN', 'MANAGER'] },
-    { name: t('settings'), path: '/settings', icon: Settings, roles: ['ADMIN'] },
+    { name: t('reports'), path: '/reports', icon: BarChart3, roles: ['ADMIN', 'MANAGER'], perm: 'reports:view' },
+    { name: t('settings'), path: '/settings', icon: Settings, roles: ['ADMIN'], perm: 'settings:edit' },
   ];
 
-  const handleRoleSwitch = (role: Role) => {
-    switchDemoRole(role);
-    setShowRoleSelector(false);
+  const handleUpdateSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSecFeedback(null);
+    setSecBusy(true);
+    try {
+      if (secTab === 'password') {
+        await apiFetch('/api/v1/auth/change-password', {
+          method: 'POST',
+          body: { currentPassword, newPassword },
+        });
+        setCurrentPassword('');
+        setNewPassword('');
+        setSecFeedback({ type: 'ok', msg: 'Password updated successfully.' });
+      } else {
+        await apiFetch('/api/v1/auth/change-pin', {
+          method: 'POST',
+          body: { currentPassword, newPin },
+        });
+        setCurrentPassword('');
+        setNewPin('');
+        setSecFeedback({ type: 'ok', msg: 'Security PIN updated cleanly.' });
+      }
+    } catch (err) {
+      setSecFeedback({
+        type: 'err',
+        msg: err instanceof Error ? err.message : 'Failed to update security credentials.',
+      });
+    } finally {
+      setSecBusy(false);
+    }
   };
 
   return (
@@ -75,9 +137,9 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           <nav className="space-y-1.5">
             {navigation.map((item) => {
               const isActive = location.pathname === item.path;
-              const hasAccess = user && item.roles.includes(user.role);
-
-              if (!hasAccess) return null;
+              const roleOk = Boolean(user && item.roles.includes(user.role));
+              const permOk = !item.perm || hasGranularPermission(item.perm);
+              if (!roleOk || !permOk) return null;
 
               const Icon = item.icon;
               return (
@@ -98,45 +160,32 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
           </nav>
         </div>
 
-        {/* User & Shift Card */}
+        {/* Authenticated User & Security Controls */}
         <div className="pt-4 border-t border-zinc-800/80 space-y-3">
-          {/* Quick Role Switcher */}
-          <div className="relative">
+          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-900/90 border border-zinc-800 text-xs">
+            <span className="flex items-center space-x-1.5 text-amber-300 font-semibold">
+              <Shield className="w-3.5 h-3.5 text-amber-400" />
+              <span>Role: {user?.role}</span>
+            </span>
             <button
-              onClick={() => setShowRoleSelector(!showRoleSelector)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-zinc-900/90 border border-zinc-800 hover:border-amber-500/40 text-amber-300 text-xs font-semibold transition-colors"
+              onClick={() => {
+                setSecFeedback(null);
+                setShowSecurityModal(true);
+              }}
+              className="flex items-center space-x-1 text-[10px] font-bold text-zinc-400 hover:text-amber-300 transition-colors"
+              title="Update Password or Security PIN"
             >
-              <span className="flex items-center space-x-1.5">
-                <Shield className="w-3.5 h-3.5 text-amber-400" />
-                <span>Role: {user?.role}</span>
-              </span>
-              <RefreshCw className="w-3 h-3 text-amber-400" />
+              <KeyRound className="w-3 h-3" />
+              <span>My PIN</span>
             </button>
-
-            {showRoleSelector && (
-              <div className="absolute bottom-12 left-0 right-0 bg-[#121217] border border-zinc-700 rounded-xl p-2 shadow-2xl space-y-1 z-50">
-                <div className="text-[10px] text-zinc-400 font-semibold px-2 py-1 uppercase border-b border-zinc-800 mb-1">Switch Demo Role</div>
-                {(['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'] as Role[]).map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => handleRoleSwitch(r)}
-                    className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
-                      user?.role === r ? 'bg-amber-500 text-zinc-950 font-bold' : 'text-zinc-300 hover:bg-zinc-800'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
           <div className="flex items-center justify-between px-1">
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-3 min-w-0">
               <img
                 src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80'}
                 alt={user?.name}
-                className="w-9 h-9 rounded-full object-cover border border-amber-500/40"
+                className="w-9 h-9 rounded-full object-cover border border-amber-500/40 flex-shrink-0"
               />
               <div className="overflow-hidden">
                 <p className="text-xs font-bold text-zinc-200 truncate">{user?.name}</p>
@@ -144,12 +193,12 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </div>
             </div>
             <button
-              onClick={() => {
-                logout();
-                navigate('/login');
+              onClick={async () => {
+                await logout();
+                navigate('/login', { replace: true });
               }}
-              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-              title="Logout"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors flex-shrink-0"
+              title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -207,9 +256,8 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
             </div>
           </div>
 
-          {/* Right Header Bar: Command Palette Launcher, Quad Language Selector & Clock */}
+          {/* Right Header Bar */}
           <div className="flex items-center space-x-3 text-sm text-zinc-300">
-            {/* Command Palette Ctrl+K Launcher */}
             <button
               onClick={() => setShowCommandPalette(true)}
               className="flex items-center space-x-2 px-3 py-1.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-semibold shadow-inner"
@@ -221,7 +269,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               </kbd>
             </button>
 
-            {/* Quad Language Selector Buttons */}
             <div className="flex items-center bg-zinc-900/90 p-1 rounded-2xl border border-zinc-800 shadow-inner">
               <Globe className="w-3.5 h-3.5 text-amber-400 ml-2 mr-1" />
               {(['EN', 'KH', 'TH', 'ZH'] as Language[]).map((lang) => (
@@ -242,7 +289,6 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
               ))}
             </div>
 
-            {/* Time */}
             <div className="hidden sm:flex items-center space-x-2 bg-zinc-900/90 px-3 py-1.5 rounded-xl border border-zinc-800 text-xs">
               <Clock className="w-4 h-4 text-amber-400" />
               <span className="font-mono text-amber-300 font-bold">
@@ -264,11 +310,115 @@ export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) =>
         </main>
       </div>
 
-      {/* Global Command Palette */}
       <CommandPalette
         isOpen={showCommandPalette}
         onClose={() => setShowCommandPalette(false)}
       />
+
+      {/* Self-Service Password & PIN Change Modal */}
+      {showSecurityModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+          <div className="w-full max-w-md bg-zinc-900 border border-amber-500/30 rounded-3xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <KeyRound className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-bold text-zinc-100">Account Credentials & Terminal PIN</h3>
+              </div>
+              <button
+                onClick={() => setShowSecurityModal(false)}
+                className="w-7 h-7 rounded-full bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex space-x-2 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
+              <button
+                type="button"
+                onClick={() => { setSecTab('pin'); setSecFeedback(null); }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  secTab === 'pin' ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Update Security PIN
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSecTab('password'); setSecFeedback(null); }}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  secTab === 'password' ? 'bg-amber-500 text-zinc-950' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                Change Password
+              </button>
+            </div>
+
+            {secFeedback && (
+              <div
+                className={`p-3 rounded-xl text-xs font-semibold ${
+                  secFeedback.type === 'ok'
+                    ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300'
+                    : 'bg-red-950/60 border border-red-500/40 text-red-300'
+                }`}
+              >
+                {secFeedback.msg}
+              </div>
+            )}
+
+            <form onSubmit={handleUpdateSecurity} className="space-y-3">
+              <div>
+                <label className="text-xs text-zinc-400 block mb-1">Current Password (Required)</label>
+                <input
+                  type="password"
+                  required
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl glass-input text-xs text-zinc-100"
+                  placeholder="Enter your current password"
+                />
+              </div>
+
+              {secTab === 'pin' ? (
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1">New 4-Digit POS PIN</label>
+                  <input
+                    type="password"
+                    required
+                    maxLength={6}
+                    pattern="\d{4,6}"
+                    value={newPin}
+                    onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3.5 py-2 rounded-xl glass-input text-xs text-zinc-100 font-mono"
+                    placeholder="4 to 6 digits"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs text-zinc-400 block mb-1">New Password (min 8 characters)</label>
+                  <input
+                    type="password"
+                    required
+                    minLength={8}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-xl glass-input text-xs text-zinc-100"
+                    placeholder="Minimum 8 characters"
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={secBusy}
+                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs flex items-center justify-center space-x-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>{secBusy ? 'Saving...' : 'Update Credentials'}</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

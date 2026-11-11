@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Layers, Users, Check, Ban } from 'lucide-react';
 import { DiningTable } from '../../types';
-import { getTables } from '../../services/orderService';
+import { fetchTables } from '../../services/orderService';
 
 interface Props {
   selectedTable: DiningTable | null;
@@ -10,8 +10,12 @@ interface Props {
 }
 
 export const TablePickerModal: React.FC<Props> = ({ selectedTable, onSelectTable, onClose }) => {
-  const [tables] = useState<DiningTable[]>(() => getTables());
+  const [tables, setTables] = useState<DiningTable[]>([]);
   const [activeSection, setActiveSection] = useState<'All' | 'Main Floor' | 'Terrace' | 'VIP Lounge'>('All');
+
+  useEffect(() => {
+    fetchTables().then(setTables).catch(console.error);
+  }, []);
 
   const filtered = tables.filter((t) => {
     if (activeSection === 'All') return true;

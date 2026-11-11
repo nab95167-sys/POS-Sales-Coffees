@@ -1,14 +1,36 @@
-import React, { useState } from 'react';
-import { Layers, Users, Coffee, Check, ArrowRightLeft, Calendar, Sparkles } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Layers, Users, Coffee, ArrowRightLeft } from 'lucide-react';
 import { DiningTable, TableStatus } from '../../types';
-import { INITIAL_TABLES } from '../../services/mockData';
+import { fetchTables, updateTableStatusApi, transferTableApi } from '../../services/orderService';
 import { MoveTableModal } from './MoveTableModal';
 
 export const FloorPlan: React.FC = () => {
-  const [tables, setTables] = useState<DiningTable[]>(INITIAL_TABLES);
+  const navigate = useNavigate();
+  const [tables, setTables] = useState<DiningTable[]>([]);
   const [selectedSection, setSelectedSection] = useState<'All' | 'Main Floor' | 'Terrace' | 'VIP Lounge'>('All');
   const [selectedTable, setSelectedTable] = useState<DiningTable | null>(null);
   const [movingTable, setMovingTable] = useState<DiningTable | null>(null);
+
+  const loadTables = useCallback(async () => {
+    try {
+      const data = await fetchTables();
+      setTables(data);
+    } catch (err) {
+      console.error('Failed to load tables:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTables();
+    const onUpdate = () => { void loadTables(); };
+    window.addEventListener('coffee_tables_updated', onUpdate);
+    window.addEventListener('coffee_order_created', onUpdate);
+    return () => {
+      window.removeEventListener('coffee_tables_updated', onUpdate);
+      window.removeEventListener('coffee_order_created', onUpdate);
+    };
+  }, [loadTables]);
 
   const filteredTables = tables.filter((t) => {
     if (selectedSection === 'All') return true;
@@ -28,29 +50,30 @@ export const FloorPlan: React.FC = () => {
     }
   };
 
-  const updateTableStatus = (tableId: string, status: TableStatus) => {
-    setTables((prev) => prev.map((t) => (t.id === tableId ? { ...t, status } : t)));
-    if (selectedTable && selectedTable.id === tableId) {
-      setSelectedTable({ ...selectedTable, status });
+  const updateTableStatus = async (tableId: string, status: TableStatus) => {
+    try {
+      const updated = await updateTableStatusApi(tableId, status);
+      setTables((prev) => prev.map((t) => (t.id === tableId ? updated : t)));
+      if (selectedTable && selectedTable.id === tableId) {
+        setSelectedTable(updated);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update table status');
     }
   };
 
-  const handleConfirmTableMove = (targetTableId: string) => {
+  const handleConfirmTableMove = async (targetTableId: string) => {
     if (!movingTable) return;
-    setTables((prev) =>
-      prev.map((t) => {
-        if (t.id === movingTable.id) {
-          return { ...t, status: 'AVAILABLE', currentOrderId: undefined };
-        }
-        if (t.id === targetTableId) {
-          return { ...t, status: 'OCCUPIED', currentOrderId: movingTable.currentOrderId || 'ORD-TRANSFERRED' };
-        }
-        return t;
-      })
-    );
-    setMovingTable(null);
-    setSelectedTable(null);
-    alert(`Order transferred successfully from ${movingTable.name} to target table.`);
+    try {
+      const updatedTables = await transferTableApi(movingTable.id, targetTableId);
+      setTables(updatedTables);
+      const fromName = movingTable.name;
+      setMovingTable(null);
+      setSelectedTable(null);
+      alert(`Order transferred successfully from ${fromName} to target table.`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to transfer table');
+    }
   };
 
   return (
@@ -177,7 +200,7 @@ export const FloorPlan: React.FC = () => {
               <button
                 onClick={() => {
                   setSelectedTable(null);
-                  window.location.href = '/pos';
+                  navigate('/pos');
                 }}
                 className="w-full py-3 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 text-stone-950 font-bold text-xs flex items-center justify-center space-x-2"
               >

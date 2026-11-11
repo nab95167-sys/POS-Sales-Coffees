@@ -6,7 +6,7 @@ import {
   ShieldCheck, KeyRound, ShieldAlert, FileText, Ban, FileSpreadsheet, Wallet, Megaphone,
   History, Layers, ChevronDown
 } from 'lucide-react';
-import { Product, CartItem, Order, OrderType, PaymentMethod, Category, DiningTable, SplitPayment } from '../types';
+import { Product, CartItem, Order, OrderType, PaymentMethod, DiningTable, SplitPayment, StoreSettings } from '../types';
 import { VariantToppingModal } from '../components/pos/VariantToppingModal';
 import { PaymentModal } from '../components/pos/PaymentModal';
 import { ThermalReceiptModal } from '../components/pos/ThermalReceiptModal';
@@ -33,10 +33,11 @@ import { BroadcastBanner } from '../components/ui/BroadcastBanner';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { useProducts } from '../context/ProductContext';
-import { saveOrder } from '../services/orderService';
-import { sendTelegramSaleAlert } from '../services/telegramBotService';
+import { createOrderApi } from '../services/orderService';
+import { showToastNotification } from '../services/telegramBotService';
 import { soundEffects } from '../services/soundService';
 import { logSecurityEvent } from '../services/securityAuditService';
+import { apiFetch } from '../services/api';
 
 export const PosPage: React.FC = () => {
   const { user } = useAuth();
@@ -46,11 +47,16 @@ export const PosPage: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>('cat-1');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Store authoritative tax & KHR rate
+  const [taxRate, setTaxRate] = useState<number>(10);
+  const [khrExchangeRate, setKhrExchangeRate] = useState<number>(4100);
+
   // Cart & Order State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [orderType, setOrderType] = useState<OrderType>('DINE_IN');
   const [discountPercent, setDiscountPercent] = useState<number>(0);
   const [couponCode, setCouponCode] = useState<string>('');
+  const [appliedPromotionId, setAppliedPromotionId] = useState<string | undefined>(undefined);
   const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
   const [lastScannedItem, setLastScannedItem] = useState<string | null>(null);
 
@@ -60,8 +66,17 @@ export const PosPage: React.FC = () => {
   const [managerPinAction, setManagerPinAction] = useState<{
     title: string;
     details: string;
-    onApproved: () => void;
+    onApproved: (overrideToken?: string) => void;
   } | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ settings: StoreSettings }>('/api/v1/settings')
+      .then((res) => {
+        setTaxRate(res.settings.taxRate);
+        setKhrExchangeRate(res.settings.khrExchangeRate);
+      })
+      .catch(() => {});
+  }, []);
 
   // Table & Handover & Orders State
   const [selectedTable, setSelectedTable] = useState<DiningTable | null>(null);
@@ -234,17 +249,18 @@ export const PosPage: React.FC = () => {
     setManagerPinAction({
       title: 'Void Entire Cart (បោះបង់ការកុម្ម៉ង់)',
       details: `Clear all ${cart.length} items from register (Subtotal: $${subtotal.toFixed(2)})`,
-      onApproved: () => {
+      onApproved: (overrideToken) => {
         setCart([]);
         setDiscountPercent(0);
+        setCouponCode('');
+        setAppliedPromotionId(undefined);
         soundEffects.playBeep();
-        logSecurityEvent(
+        void logSecurityEvent(
           'CART_VOID',
           'Cart Voided',
           `Cleared ${cart.length} items ($${subtotal.toFixed(2)})`,
           user?.name || 'Cashier',
-          'Manager (PIN: 1234)',
-          'WARNING'
+          overrideToken
         );
         alert('Cart voided successfully by Manager authorization.');
       },
@@ -255,15 +271,14 @@ export const PosPage: React.FC = () => {
     setManagerPinAction({
       title: 'Open Cash Drawer (No Sale / បើកថតលុយ)',
       details: 'Manual drawer kick for physical cash count or change exchange',
-      onApproved: () => {
+      onApproved: (overrideToken) => {
         soundEffects.playCashRegister();
-        logSecurityEvent(
+        void logSecurityEvent(
           'DRAWER_KICK',
           'Cash Drawer Opened (No Sale)',
           'Manual drawer kick approved via Manager PIN',
           user?.name || 'Cashier',
-          'Manager (PIN: 1234)',
-          'WARNING'
+          overrideToken
         );
         alert('Cash drawer solenoid triggered & opened!');
       },
@@ -273,16 +288,22 @@ export const PosPage: React.FC = () => {
   const subtotal = cart.reduce((sum, item) => sum + item.itemSubtotal, 0);
   const discountAmount = subtotal * (discountPercent / 100);
   const taxableSubtotal = Math.max(0, subtotal - discountAmount);
-  const taxAmount = taxableSubtotal * 0.10; // 10% VAT
+  const taxAmount = taxableSubtotal * (taxRate / 100);
   const totalAmount = taxableSubtotal + taxAmount;
 
   const handleApplyCoupon = () => {
-    if (couponCode.toUpperCase() === 'COFFEE20') {
+    const code = couponCode.trim().toUpperCase();
+    setAppliedPromotionId(undefined);
+    if (code === 'COFFEE20') {
       setDiscountPercent(20);
       soundEffects.playBeep();
       alert('Coupon COFFEE20 applied! 20% discount added.');
+    } else if (code === 'VIP10') {
+      setDiscountPercent(10);
+      soundEffects.playBeep();
+      alert('Coupon VIP10 applied! 10% discount added.');
     } else {
-      alert('Invalid coupon code. Try "COFFEE20".');
+      alert('Invalid coupon code. Try "COFFEE20" or "VIP10".');
     }
   };
 
@@ -336,34 +357,52 @@ export const PosPage: React.FC = () => {
     setActivePaymentOrder(newOrder);
   };
 
-  const handlePaymentCompleted = (
+  const handlePaymentCompleted = async (
     method: PaymentMethod,
     amountPaid: number,
-    changeAmount: number,
+    _changeAmount: number,
     transactionId?: string,
     splitPayments?: SplitPayment[]
   ) => {
     if (!activePaymentOrder) return;
 
-    const finalizedOrder: Order = {
-      ...activePaymentOrder,
-      paymentMethod: method,
-      amountPaid,
-      changeAmount,
-      splitPayments,
-      status: 'PREPARING',
-    };
+    try {
+      const serverOrder = await createOrderApi({
+        type: activePaymentOrder.type,
+        tableId: activePaymentOrder.tableId,
+        customerId: activePaymentOrder.customerId,
+        items: activePaymentOrder.items.map((item) => ({
+          cartItemId: item.cartItemId,
+          productId: item.productId,
+          variantId: item.selectedVariant?.id,
+          selectedToppingIds: item.selectedToppings.map((tp) => tp.id),
+          quantity: item.quantity,
+          notes: item.notes,
+        })),
+        couponCode: activePaymentOrder.couponCode,
+        promotionId: appliedPromotionId,
+        discountPercent,
+        paymentMethod: method,
+        splitPayments,
+        amountPaid,
+        transactionId,
+        notes: activePaymentOrder.notes,
+      });
 
-    soundEffects.playCashRegister();
-    saveOrder(finalizedOrder); // Live order sync to KDS, table occupation, inventory deduction & order history!
-    sendTelegramSaleAlert(finalizedOrder);
+      soundEffects.playCashRegister();
+      showToastNotification(`Order ${serverOrder.orderNumber} recorded & synced to server!`);
 
-    setActivePaymentOrder(null);
-    setCart([]);
-    setDiscountPercent(0);
-    setCouponCode('');
-    setSelectedTable(null);
-    setCompletedReceiptOrder(finalizedOrder);
+      setActivePaymentOrder(null);
+      setCart([]);
+      setDiscountPercent(0);
+      setCouponCode('');
+      setAppliedPromotionId(undefined);
+      setSelectedTable(null);
+      setCompletedReceiptOrder(serverOrder);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Checkout failed on server');
+      setActivePaymentOrder(null);
+    }
   };
 
   return (
@@ -467,16 +506,18 @@ export const PosPage: React.FC = () => {
                       <span className="text-[10px] text-zinc-400">Manual Solenoid Kick</span>
                     </div>
                   </button>
-                  <button
-                    onClick={() => setShowSecurityAuditModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-emerald-400 transition-colors"
-                  >
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <div>
-                      <span className="font-bold block">Security Audit Log</span>
-                      <span className="text-[10px] text-zinc-400">Anti-Theft Activity Trail</span>
-                    </div>
-                  </button>
+                  {(user?.role === 'ADMIN' || user?.role === 'MANAGER') && (
+                    <button
+                      onClick={() => setShowSecurityAuditModal(true)}
+                      className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-emerald-400 transition-colors"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                      <div>
+                        <span className="font-bold block">Security Audit Log</span>
+                        <span className="text-[10px] text-zinc-400">Anti-Theft Activity Trail</span>
+                      </div>
+                    </button>
+                  )}
                   <div className="border-t border-zinc-800 my-1"></div>
                   <button
                     onClick={() => {
@@ -993,14 +1034,14 @@ export const PosPage: React.FC = () => {
               </div>
             )}
             <div className="flex justify-between">
-              <span>{t('tax')} (10% VAT)</span>
+              <span>{t('tax')} ({taxRate}% VAT)</span>
               <span className="font-mono text-zinc-200 font-bold">${taxAmount.toFixed(2)}</span>
             </div>
             <div className="flex justify-between items-baseline pt-2 border-t border-zinc-800 text-base font-extrabold text-zinc-100">
               <div>
                 <span>{t('totalPayable')}</span>
                 <span className="text-[11px] font-normal text-zinc-400 block font-mono">
-                  ៛{(Math.round(totalAmount * 4100 / 100) * 100).toLocaleString()} KHR
+                  ៛{(Math.round(totalAmount * khrExchangeRate / 100) * 100).toLocaleString()} KHR
                 </span>
               </div>
               <span className="text-2xl font-mono font-black text-amber-400 gold-gradient-text">${totalAmount.toFixed(2)}</span>
@@ -1168,10 +1209,10 @@ export const PosPage: React.FC = () => {
           actionTitle={managerPinAction.title}
           actionDetails={managerPinAction.details}
           performedBy={user?.name || 'Cashier'}
-          onSuccess={() => {
+          onSuccess={(overrideToken) => {
             const approvedCallback = managerPinAction.onApproved;
             setManagerPinAction(null);
-            approvedCallback();
+            approvedCallback(overrideToken);
           }}
           onClose={() => setManagerPinAction(null)}
         />
@@ -1205,9 +1246,16 @@ export const PosPage: React.FC = () => {
         <PromotionManagerModal
           onClose={() => setShowPromotionModal(false)}
           onApplyToCart={(promo) => {
-            setDiscountPercent(promo.value);
+            setAppliedPromotionId(promo.id);
+            setCouponCode('');
+            if (promo.type === 'FIXED') {
+              const pct = subtotal > 0 ? Math.min(100, (promo.value / subtotal) * 100) : 0;
+              setDiscountPercent(Number(pct.toFixed(2)));
+            } else {
+              setDiscountPercent(promo.value);
+            }
             soundEffects.playSuccess();
-            alert(`បានអនុវត្តប្រូម៉ូសិន: ${promo.nameKh} (${promo.value}% OFF)`);
+            alert(`បានអនុវត្តប្រូម៉ូសិន: ${promo.nameKh} (${promo.type === 'FIXED' ? `$${promo.value.toFixed(2)}` : `${promo.value}%`} OFF)`);
           }}
         />
       )}

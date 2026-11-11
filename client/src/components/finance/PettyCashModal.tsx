@@ -1,6 +1,14 @@
-import React, { useState } from 'react';
-import { X, Receipt, Plus, Trash2, DollarSign, Calendar, User, Tag, CheckCircle2 } from 'lucide-react';
-import { getExpenses, addExpense, deleteExpense, Expense } from '../../services/expenseService';
+import React, { useEffect, useState } from 'react';
+import { X, Receipt, Plus, Trash2, CheckCircle2, RefreshCw } from 'lucide-react';
+import {
+  fetchExpenses,
+  createExpenseApi,
+  deleteExpenseApi,
+  computeTodayExpenses,
+  Expense,
+} from '../../services/expenseService';
+import { useAuth } from '../../context/AuthContext';
+import { ApiError } from '../../services/api';
 import { soundEffects } from '../../services/soundService';
 
 interface Props {
@@ -8,8 +16,15 @@ interface Props {
   cashierName: string;
 }
 
-export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
-  const [expenses, setExpenses] = useState<Expense[]>(getExpenses());
+export const PettyCashModal: React.FC<Props> = ({ onClose }) => {
+  const { hasGranularPermission } = useAuth();
+  const canCreate = hasGranularPermission('pos:shift_manage');
+  const canDelete = hasGranularPermission('reports:view');
+
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
 
   // Form states
@@ -19,40 +34,69 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
   const [description, setDescription] = useState('');
   const [paidTo, setPaidTo] = useState('');
 
-  const handleAddExpense = (e: React.FormEvent) => {
+  const loadExpenses = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await fetchExpenses();
+      setExpenses(list);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load expenses');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadExpenses();
+  }, []);
+
+  const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreate) return;
     const numAmount = parseFloat(amount);
     if (!numAmount || numAmount <= 0) {
-      alert('Please enter a valid expense amount.');
+      setError('Please enter a valid positive expense amount.');
       return;
     }
 
-    const created = addExpense({
-      category,
-      amount: numAmount,
-      currency,
-      description: description.trim() || category,
-      paidTo: paidTo.trim() || 'Store Vendor',
-      recordedBy: cashierName,
-    });
-
-    soundEffects.playBeep();
-    setExpenses([created, ...expenses]);
-    setAmount('');
-    setDescription('');
-    setPaidTo('');
-    setShowAddForm(false);
-  };
-
-  const handleDelete = (id: string) => {
-    if (confirm('Delete this expense entry?')) {
-      deleteExpense(id);
-      setExpenses((prev) => prev.filter((e) => e.id !== id));
+    setSubmitting(true);
+    setError(null);
+    try {
+      const created = await createExpenseApi({
+        category,
+        amount: numAmount,
+        currency,
+        description: description.trim() || category,
+        paidTo: paidTo.trim() || 'Store Vendor',
+      });
       soundEffects.playBeep();
+      setExpenses((prev) => [created, ...prev]);
+      setAmount('');
+      setDescription('');
+      setPaidTo('');
+      setShowAddForm(false);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to record expense');
+    } finally {
+      setSubmitting(false);
     }
   };
 
-  const totalUSD = expenses.reduce((sum, e) => sum + (e.currency === 'USD' ? e.amount : e.amount / 4100), 0);
+  const handleDelete = async (id: string) => {
+    if (!canDelete) return;
+    if (!confirm('Delete this expense entry?')) return;
+    setError(null);
+    try {
+      await deleteExpenseApi(id);
+      setExpenses((prev) => prev.filter((e) => e.id !== id));
+      soundEffects.playBeep();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete expense');
+    }
+  };
+
+  const totalUSD = computeTodayExpenses(expenses);
   const totalKHR = Math.round(totalUSD * 4100);
 
   return (
@@ -66,15 +110,25 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
             </div>
             <div>
               <h3 className="text-base font-bold text-stone-100">Petty Cash & Daily Expenses (ការចំណាយប្រចាំថ្ងៃ)</h3>
-              <p className="text-xs text-stone-400">Record cash paid out of register for daily café supplies</p>
+              <p className="text-xs text-stone-400">Synced with SQLite register cash-out & shift reconciliation</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-stone-800 text-stone-400 hover:text-white flex items-center justify-center"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => void loadExpenses()}
+              disabled={loading}
+              className="w-8 h-8 rounded-full bg-stone-800 text-stone-400 hover:text-white flex items-center justify-center"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-stone-800 text-stone-400 hover:text-white flex items-center justify-center"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Summary Card & Add Toggle */}
@@ -87,25 +141,33 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
             </div>
           </div>
 
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="px-4 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-900/30 transition-all self-start sm:self-center"
-          >
-            <Plus className="w-4 h-4" />
-            <span>{showAddForm ? 'Cancel Entry' : 'Record New Expense'}</span>
-          </button>
+          {canCreate && (
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="px-4 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-900/30 transition-all self-start sm:self-center"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{showAddForm ? 'Cancel Entry' : 'Record New Expense'}</span>
+            </button>
+          )}
         </div>
+
+        {error && (
+          <div className="mx-6 mt-3 p-2.5 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 text-xs font-semibold">
+            {error}
+          </div>
+        )}
 
         {/* Add Form Accordion */}
         {showAddForm && (
-          <form onSubmit={handleAddExpense} className="p-6 bg-stone-900/90 border-b border-amber-600/30 space-y-4 animate-in slide-in-from-top-4 duration-200">
+          <form onSubmit={(e) => void handleAddExpense(e)} className="p-6 bg-stone-900/90 border-b border-amber-600/30 space-y-4 animate-in slide-in-from-top-4 duration-200">
             <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">New Out-of-Pocket Expense Entry</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs font-semibold text-stone-300 block mb-1">Expense Category</label>
                 <select
                   value={category}
-                  onChange={(e) => setCategory(e.target.value as any)}
+                  onChange={(e) => setCategory(e.target.value as Expense['category'])}
                   className="w-full px-3.5 py-2.5 rounded-xl glass-input text-stone-100 text-xs font-bold focus:outline-none"
                 >
                   <option value="Ice & Water" className="bg-stone-900">Ice & Tube Water Delivery</option>
@@ -143,7 +205,7 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
                   />
                   <select
                     value={currency}
-                    onChange={(e) => setCurrency(e.target.value as any)}
+                    onChange={(e) => setCurrency(e.target.value as 'USD' | 'KHR')}
                     className="px-3 py-2.5 rounded-xl glass-input text-xs font-bold text-amber-400 bg-stone-900"
                   >
                     <option value="USD">USD ($)</option>
@@ -167,10 +229,11 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
             <div className="pt-2 flex justify-end">
               <button
                 type="submit"
-                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-md"
+                disabled={submitting}
+                className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-md"
               >
                 <CheckCircle2 className="w-4 h-4" />
-                <span>Save Expense to Register</span>
+                <span>{submitting ? 'Saving...' : 'Save Expense to Register'}</span>
               </button>
             </div>
           </form>
@@ -178,9 +241,11 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
 
         {/* Expenses List */}
         <div className="p-6 max-h-[50vh] overflow-y-auto space-y-3">
-          {expenses.length === 0 ? (
+          {loading && expenses.length === 0 ? (
+            <div className="text-center py-10 text-stone-500 text-xs">Loading expenses...</div>
+          ) : expenses.length === 0 ? (
             <div className="text-center py-10 text-stone-500 text-xs">
-              No out-of-pocket expenses recorded for today.
+              No out-of-pocket expenses recorded yet.
             </div>
           ) : (
             expenses.map((exp) => (
@@ -196,7 +261,7 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
                   <p className="text-[11px] text-stone-400">{exp.description}</p>
                   <div className="text-[10px] text-stone-500 flex items-center space-x-3 pt-0.5">
                     <span>Recorded by: {exp.recordedBy}</span>
-                    <span>• {new Date(exp.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>• {new Date(exp.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 </div>
 
@@ -204,13 +269,15 @@ export const PettyCashModal: React.FC<Props> = ({ onClose, cashierName }) => {
                   <span className="text-base font-bold font-mono text-red-400">
                     -{exp.currency === 'USD' ? `$${exp.amount.toFixed(2)}` : `៛${exp.amount.toLocaleString()}`}
                   </span>
-                  <button
-                    onClick={() => handleDelete(exp.id)}
-                    className="p-1.5 rounded-lg bg-stone-900 hover:bg-red-950/60 text-stone-500 hover:text-red-400 border border-stone-800"
-                    title="Delete entry"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {canDelete && (
+                    <button
+                      onClick={() => void handleDelete(exp.id)}
+                      className="p-1.5 rounded-lg bg-stone-900 hover:bg-red-950/60 text-stone-500 hover:text-red-400 border border-stone-800"
+                      title="Delete entry"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             ))

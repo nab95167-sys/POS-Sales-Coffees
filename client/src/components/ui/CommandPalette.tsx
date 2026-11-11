@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Search, ShoppingBag, UtensilsCrossed, Layers, LayoutDashboard, 
-  Coffee, Package, Users, ShieldAlert, BarChart3, Settings, X, Command, ArrowRight
+import {
+  Search, ShoppingBag, UtensilsCrossed, Layers, LayoutDashboard,
+  Coffee, Package, Users, ShieldAlert, BarChart3, Settings, ArrowRight
 } from 'lucide-react';
-import { INITIAL_PRODUCTS } from '../../services/mockData';
+import { useProducts } from '../../context/ProductContext';
 
 interface Props {
   isOpen: boolean;
@@ -14,15 +14,13 @@ interface Props {
 export const CommandPalette: React.FC<Props> = ({ isOpen, onClose }) => {
   const [query, setQuery] = useState('');
   const navigate = useNavigate();
+  const { products } = useProducts();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         if (isOpen) onClose();
-        else {
-          // Trigger open via state in parent or keyboard listener
-        }
       }
       if (e.key === 'Escape' && isOpen) {
         onClose();
@@ -52,8 +50,10 @@ export const CommandPalette: React.FC<Props> = ({ isOpen, onClose }) => {
     cmd.name.toLowerCase().includes(query.toLowerCase())
   );
 
-  const filteredProducts = INITIAL_PRODUCTS.filter((p) =>
-    p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase())
+  const filteredProducts = products.filter(
+    (p) =>
+      p.name.toLowerCase().includes(query.toLowerCase()) ||
+      p.sku.toLowerCase().includes(query.toLowerCase())
   );
 
   const handleSelectNav = (path: string) => {

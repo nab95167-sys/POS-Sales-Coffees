@@ -1,55 +1,63 @@
 import { Request, Response, NextFunction } from 'express';
+import { config } from '../config';
 
-// Sanitizes input against XSS & Script Injection
-export const sanitizeInput = (req: Request, res: Response, next: NextFunction) => {
-  if (req.body) {
-    req.body = sanitizeObject(req.body);
-  }
-  
-  if (req.query) {
-    req.query = sanitizeObject(req.query);
-  }
-  if (req.params) {
-    req.params = sanitizeObject(req.params);
-  }
-  next();
-};
+const SENSITIVE_SKIP_KEYS = new Set([
+  'password',
+  'currentPassword',
+  'newPassword',
+  'pin',
+  'currentPin',
+  'newPin',
+  'botToken',
+  'telegramBotToken',
+]);
 
-const sanitizeObject = (obj: any): any => {
+const sanitizeObject = (obj: unknown, keyName?: string): unknown => {
+  if (keyName && SENSITIVE_SKIP_KEYS.has(keyName)) {
+    return obj;
+  }
   if (typeof obj === 'string') {
-    // Strip HTML script tags & dangerous SQL characters
     return obj
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/--/g, '')
-      .replace(/;/g, '')
+      .replace(/javascript:/gi, '')
       .trim();
   }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeObject(item));
+  }
   if (typeof obj === 'object' && obj !== null) {
-    for (const key in obj) {
-      if (Object.prototype.hasOwnProperty.call(obj, key)) {
-        obj[key] = sanitizeObject(obj[key]);
-      }
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = sanitizeObject(v, k);
     }
+    return out;
   }
   return obj;
 };
 
-// Security Audit Event Logger
-export interface SecurityAuditLog {
-  timestamp: string;
-  eventType: 'LOGIN_SUCCESS' | 'LOGIN_FAILED' | 'ROLE_CHANGE' | 'SENSITIVE_EXPORT' | 'PAYMENT_VOID';
-  userId?: string;
-  userRole?: string;
-  ipAddress: string;
-  userAgent: string;
-  details: string;
-}
+export const sanitizeInput = (req: Request, _res: Response, next: NextFunction): void => {
+  if (req.body && typeof req.body === 'object') {
+    req.body = sanitizeObject(req.body);
+  }
+  if (req.query && typeof req.query === 'object') {
+    req.query = sanitizeObject(req.query) as Request['query'];
+  }
+  if (req.params && typeof req.params === 'object') {
+    req.params = sanitizeObject(req.params) as Request['params'];
+  }
+  next();
+};
 
-export const logSecurityEvent = (log: Omit<SecurityAuditLog, 'timestamp'>) => {
-  const auditEntry: SecurityAuditLog = {
-    ...log,
-    timestamp: new Date().toISOString(),
-  };
-  console.log('🔒 SECURITY AUDIT LOG:', JSON.stringify(auditEntry));
-  // In production, this persists to PostgreSQL AuditLogs table or SIEM logger
+export const verifyOriginForMutations = (req: Request, res: Response, next: NextFunction): void => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    next();
+    return;
+  }
+
+  const origin = req.headers.origin;
+  if (origin && !config.allowedOrigins.includes(origin)) {
+    res.status(403).json({ error: 'CSRF origin check rejected' });
+    return;
+  }
+  next();
 };

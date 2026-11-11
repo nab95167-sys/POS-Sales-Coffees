@@ -1,46 +1,46 @@
-import React, { useState, useEffect } from 'react';
-import { Clock, CheckCircle, Utensils, AlertTriangle, Coffee, Filter } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Clock, CheckCircle, Utensils, Coffee, Filter } from 'lucide-react';
 import { Order, OrderStatus } from '../../types';
-import { SAMPLE_KDS_ORDERS } from '../../services/mockData';
+import { fetchOrders, updateOrderStatusApi } from '../../services/orderService';
 
 export const KdsBoard: React.FC = () => {
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const saved = localStorage.getItem('coffee_kds_orders');
-    return saved ? JSON.parse(saved) : SAMPLE_KDS_ORDERS;
-  });
-
+  const [orders, setOrders] = useState<Order[]>([]);
   const [activeFilter, setActiveFilter] = useState<'ALL' | OrderStatus>('ALL');
 
-  useEffect(() => {
-    const loadFromStorage = () => {
-      const saved = localStorage.getItem('coffee_kds_orders');
-      if (saved) {
-        try {
-          setOrders(JSON.parse(saved));
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    };
-
-    window.addEventListener('coffee_order_created', loadFromStorage);
-    window.addEventListener('coffee_order_refunded', loadFromStorage);
-    window.addEventListener('storage', loadFromStorage);
-    return () => {
-      window.removeEventListener('coffee_order_created', loadFromStorage);
-      window.removeEventListener('coffee_order_refunded', loadFromStorage);
-      window.removeEventListener('storage', loadFromStorage);
-    };
+  const loadKdsOrders = useCallback(async () => {
+    try {
+      const list = await fetchOrders({ limit: 100 });
+      setOrders(list.filter((o) => !o.isRefunded && o.status !== 'CANCELLED'));
+    } catch (err) {
+      console.error('Failed to load KDS orders:', err);
+    }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('coffee_kds_orders', JSON.stringify(orders));
-  }, [orders]);
+    void loadKdsOrders();
+    const timer = setInterval(() => {
+      void loadKdsOrders();
+    }, 8000);
 
-  const updateOrderStatus = (orderId: string, nextStatus: OrderStatus) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status: nextStatus } : o))
-    );
+    const onRefresh = () => {
+      void loadKdsOrders();
+    };
+    window.addEventListener('coffee_order_created', onRefresh);
+    window.addEventListener('coffee_order_refunded', onRefresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('coffee_order_created', onRefresh);
+      window.removeEventListener('coffee_order_refunded', onRefresh);
+    };
+  }, [loadKdsOrders]);
+
+  const updateOrderStatus = async (orderId: string, nextStatus: OrderStatus) => {
+    try {
+      const updated = await updateOrderStatusApi(orderId, nextStatus);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to update ticket status');
+    }
   };
 
   const filteredOrders = orders.filter((o) => {

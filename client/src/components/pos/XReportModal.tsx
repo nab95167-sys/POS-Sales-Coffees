@@ -1,8 +1,20 @@
-import React, { useState } from 'react';
-import { X, Printer, CheckCircle2, AlertTriangle, ArrowRightLeft, FileText, DollarSign, Calculator } from 'lucide-react';
-import { getTotalExpensesToday } from '../../services/expenseService';
-import { getTodaySalesMetrics } from '../../services/orderService';
+import React, { useEffect, useState } from 'react';
+import { X, Printer, CheckCircle2, AlertTriangle, ArrowRightLeft, Calculator, RefreshCw } from 'lucide-react';
+import { fetchExpenses, computeTodayExpenses } from '../../services/expenseService';
+import { fetchOrders, computeTodayMetricsFromOrders } from '../../services/orderService';
+import { apiFetch, ApiError } from '../../services/api';
 import { soundEffects } from '../../services/soundService';
+import { StoreSettings } from '../../types';
+
+interface ShiftDTO {
+  id: string;
+  cashierName: string;
+  status: 'OPEN' | 'CLOSED';
+  startingFloat: number;
+  cashIn: number;
+  cashOut: number;
+  openedAt: string;
+}
 
 interface Props {
   onClose: () => void;
@@ -10,22 +22,63 @@ interface Props {
 }
 
 export const XReportModal: React.FC<Props> = ({ onClose, outgoingCashier }) => {
-  const metrics = getTodaySalesMetrics();
-  const pettyCashExpenses = getTotalExpensesToday();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [openingFloat, setOpeningFloat] = useState(0);
+  const [cashSales, setCashSales] = useState(0);
+  const [abaKhqrSales, setAbaKhqrSales] = useState(0);
+  const [grossSales, setGrossSales] = useState(0);
+  const [pettyCashExpenses, setPettyCashExpenses] = useState(0);
+  const [khrRate, setKhrRate] = useState(4100);
+  const [shiftLabel, setShiftLabel] = useState('Active Shift');
 
-  const openingFloat = 100.00;
-  const cashSales = metrics.cashSales > 0 ? metrics.cashSales : 185.00;
-  const abaKhqrSales = metrics.cashlessSales > 0 ? metrics.cashlessSales : 340.50;
-  const grossSales = metrics.grossSales > 0 ? metrics.grossSales : (cashSales + abaKhqrSales);
-
-  const expectedCashInDrawer = openingFloat + cashSales - pettyCashExpenses;
-
-  const [incomingCashier, setIncomingCashier] = useState('Sokha Ly');
-  const [actualCashUSD, setActualCashUSD] = useState<string>(expectedCashInDrawer.toFixed(2));
+  const [incomingCashier, setIncomingCashier] = useState('');
+  const [actualCashUSD, setActualCashUSD] = useState<string>('0.00');
   const [actualCashKHR, setActualCashKHR] = useState<string>('0');
 
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [orders, expenses, shiftRes, settingsRes] = await Promise.all([
+        fetchOrders({ limit: 500 }),
+        fetchExpenses(),
+        apiFetch<{ currentShift: ShiftDTO | null; recentShifts: ShiftDTO[] }>('/api/v1/finance/shifts/current'),
+        apiFetch<{ settings: StoreSettings }>('/api/v1/settings').catch(() => null),
+      ]);
+
+      const rate = settingsRes?.settings?.khrExchangeRate || 4100;
+      setKhrRate(rate);
+
+      const activeShift = shiftRes.currentShift || shiftRes.recentShifts[0] || null;
+      const shiftFloat = activeShift ? activeShift.startingFloat : 0;
+      setShiftLabel(activeShift ? `${activeShift.status} (${activeShift.cashierName})` : 'No Active Shift');
+
+      const metrics = computeTodayMetricsFromOrders(orders);
+      const expensesToday = computeTodayExpenses(expenses, rate);
+
+      setOpeningFloat(shiftFloat);
+      setCashSales(metrics.cashSales);
+      setAbaKhqrSales(metrics.cashlessSales);
+      setGrossSales(metrics.grossSales);
+      setPettyCashExpenses(expensesToday);
+
+      const expected = Math.max(0, shiftFloat + metrics.cashSales - expensesToday);
+      setActualCashUSD(expected.toFixed(2));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load shift report data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadData();
+  }, []);
+
+  const expectedCashInDrawer = openingFloat + cashSales - pettyCashExpenses;
   const countedUSD = parseFloat(actualCashUSD) || 0;
-  const countedKHRInUSD = (parseFloat(actualCashKHR) || 0) / 4100;
+  const countedKHRInUSD = (parseFloat(actualCashKHR) || 0) / khrRate;
   const totalCountedUSD = countedUSD + countedKHRInUSD;
   const cashDiscrepancy = totalCountedUSD - expectedCashInDrawer;
 
@@ -34,7 +87,7 @@ export const XReportModal: React.FC<Props> = ({ onClose, outgoingCashier }) => {
     window.print();
   };
 
-  const xReportNumber = `X-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-SHIFT-1`;
+  const xReportNumber = `X-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-HANDOVER`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md font-sans">
@@ -52,16 +105,32 @@ export const XReportModal: React.FC<Props> = ({ onClose, outgoingCashier }) => {
                   របាយការណ៍ប្តូរវេន
                 </span>
               </h2>
-              <p className="text-xs text-stone-400">Mid-day register drawer verification & shift transfer sign-off</p>
+              <p className="text-xs text-stone-400">Live mid-day drawer verification • Shift: {shiftLabel}</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-xl bg-stone-800/80 hover:bg-stone-800 text-stone-400 hover:text-stone-100 flex items-center justify-center transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => void loadData()}
+              disabled={loading}
+              className="w-8 h-8 rounded-xl bg-stone-800/80 hover:bg-stone-800 text-stone-400 hover:text-stone-100 flex items-center justify-center"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-xl bg-stone-800/80 hover:bg-stone-800 text-stone-400 hover:text-stone-100 flex items-center justify-center transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
+
+        {error && (
+          <div className="mx-6 mt-3 p-2.5 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 text-xs font-semibold">
+            {error}
+          </div>
+        )}
 
         {/* Form Body */}
         <div className="p-6 max-h-[65vh] overflow-y-auto space-y-4">
@@ -69,12 +138,13 @@ export const XReportModal: React.FC<Props> = ({ onClose, outgoingCashier }) => {
           <div className="p-4 bg-stone-950/60 border border-stone-800 rounded-2xl grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <span className="text-xs text-stone-400 block">បុគ្គលិកចេញវេន (Outgoing Cashier)</span>
-              <span className="text-sm font-bold text-stone-100">{outgoingCashier} (Morning Shift)</span>
+              <span className="text-sm font-bold text-stone-100">{outgoingCashier}</span>
             </div>
             <div>
               <label className="text-xs text-stone-400 block mb-1">បុគ្គលិកចូលវេន (Incoming Cashier)</label>
               <input
                 type="text"
+                placeholder="Enter incoming cashier name..."
                 value={incomingCashier}
                 onChange={(e) => setIncomingCashier(e.target.value)}
                 className="w-full px-3 py-1.5 rounded-xl glass-input text-xs text-stone-100 focus:outline-none focus:border-amber-500"

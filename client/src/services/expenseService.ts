@@ -1,7 +1,17 @@
+import { apiFetch } from './api';
+
+export type ExpenseCategory =
+  | 'Ice & Water'
+  | 'Dairy & Fresh Produce'
+  | 'Packaging & Cups'
+  | 'Cleaning Supplies'
+  | 'Maintenance & Repair'
+  | 'Staff Meal / Misc';
+
 export interface Expense {
   id: string;
   timestamp: string;
-  category: 'Ice & Water' | 'Dairy & Fresh Produce' | 'Packaging & Cups' | 'Cleaning Supplies' | 'Maintenance & Repair' | 'Staff Meal / Misc';
+  category: ExpenseCategory;
   amount: number;
   currency: 'USD' | 'KHR';
   description: string;
@@ -9,63 +19,45 @@ export interface Expense {
   recordedBy: string;
 }
 
-const STORAGE_KEY = 'coffee_pos_expenses';
+try {
+  localStorage.removeItem('coffee_pos_petty_cash_expenses');
+} catch {
+  // Ignore storage cleanup errors
+}
 
-export const getExpenses = (): Expense[] => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to parse expenses', e);
-  }
+export async function fetchExpenses(): Promise<Expense[]> {
+  const data = await apiFetch<{ expenses: Expense[] }>('/api/v1/finance/expenses');
+  return data.expenses;
+}
 
-  // Initial mock expenses for today
-  return [
-    {
-      id: 'exp-1',
-      timestamp: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-      category: 'Ice & Water',
-      amount: 4.50,
-      currency: 'USD',
-      description: 'Morning purified tube ice delivery (3 bags)',
-      paidTo: 'Phnom Penh Pure Ice Co.',
-      recordedBy: 'Sokha Ly',
-    },
-    {
-      id: 'exp-2',
-      timestamp: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-      category: 'Dairy & Fresh Produce',
-      amount: 8.00,
-      currency: 'USD',
-      description: 'Emergency fresh whole milk top-up (4L)',
-      paidTo: 'Lucky Supermarket',
-      recordedBy: 'Alex Wright',
-    },
-  ];
-};
+export async function createExpenseApi(payload: {
+  category: ExpenseCategory;
+  amount: number;
+  currency: 'USD' | 'KHR';
+  description: string;
+  paidTo: string;
+}): Promise<Expense> {
+  const data = await apiFetch<{ expense: Expense }>('/api/v1/finance/expenses', {
+    method: 'POST',
+    body: payload,
+  });
+  return data.expense;
+}
 
-export const addExpense = (expense: Omit<Expense, 'id' | 'timestamp'>): Expense => {
-  const current = getExpenses();
-  const newExp: Expense = {
-    ...expense,
-    id: `exp-${Date.now()}`,
-    timestamp: new Date().toISOString(),
-  };
-  const updated = [newExp, ...current];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  return newExp;
-};
+export async function deleteExpenseApi(id: string): Promise<void> {
+  await apiFetch(`/api/v1/finance/expenses/${id}`, { method: 'DELETE' });
+}
 
-export const deleteExpense = (id: string) => {
-  const current = getExpenses();
-  const updated = current.filter((e) => e.id !== id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-};
-
-export const getTotalExpensesToday = (): number => {
-  const expenses = getExpenses();
-  const todayStr = new Date().toDateString();
+export function computeTodayExpenses(expenses: Expense[], khrRate = 4100): number {
+  const todayStr = new Date().toISOString().slice(0, 10);
   return expenses
-    .filter((e) => new Date(e.timestamp).toDateString() === todayStr)
-    .reduce((sum, e) => sum + (e.currency === 'KHR' ? e.amount / 4100 : e.amount), 0);
-};
+    .filter((e) => e.timestamp.startsWith(todayStr))
+    .reduce((sum, e) => sum + (e.currency === 'KHR' ? e.amount / khrRate : e.amount), 0);
+}
+
+export function computeTotalExpenses(expenses: Expense[], khrRate = 4100): number {
+  return expenses.reduce(
+    (sum, e) => sum + (e.currency === 'KHR' ? e.amount / khrRate : e.amount),
+    0
+  );
+}

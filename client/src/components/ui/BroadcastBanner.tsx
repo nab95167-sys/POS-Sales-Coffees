@@ -1,29 +1,49 @@
 import React, { useState, useEffect } from 'react';
-import { Megaphone, AlertCircle, Sparkles, X, Edit3 } from 'lucide-react';
-import { BroadcastMessage, getActiveBroadcast } from '../../services/broadcastService';
+import { Megaphone, AlertCircle, X, Edit3 } from 'lucide-react';
+import { BroadcastMessage, fetchActiveBroadcast } from '../../services/broadcastService';
+import { useAuth } from '../../context/AuthContext';
 
 interface Props {
   onOpenManager?: () => void;
 }
 
 export const BroadcastBanner: React.FC<Props> = ({ onOpenManager }) => {
-  const [broadcast, setBroadcast] = useState<BroadcastMessage | null>(() => getActiveBroadcast());
+  const { isAuthenticated } = useAuth();
+  const [broadcast, setBroadcast] = useState<BroadcastMessage | null>(null);
   const [isDismissed, setIsDismissed] = useState(false);
 
   useEffect(() => {
-    // Poll/check periodically or listen for storage changes
-    const handleStorage = () => {
-      setBroadcast(getActiveBroadcast());
-      setIsDismissed(false);
+    if (!isAuthenticated) {
+      setBroadcast(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadActive = async () => {
+      try {
+        const active = await fetchActiveBroadcast();
+        if (!cancelled) {
+          setBroadcast(active);
+        }
+      } catch {
+        // Keep current state silently during background polling
+      }
     };
 
-    window.addEventListener('storage', handleStorage);
-    const interval = setInterval(handleStorage, 5000);
+    const handleUpdated = () => {
+      setIsDismissed(false);
+      void loadActive();
+    };
+
+    void loadActive();
+    window.addEventListener('coffee_broadcast_updated', handleUpdated);
+    const interval = setInterval(() => void loadActive(), 15000);
     return () => {
-      window.removeEventListener('storage', handleStorage);
+      cancelled = true;
+      window.removeEventListener('coffee_broadcast_updated', handleUpdated);
       clearInterval(interval);
     };
-  }, []);
+  }, [isAuthenticated]);
 
   if (!broadcast || isDismissed) return null;
 
@@ -41,11 +61,11 @@ export const BroadcastBanner: React.FC<Props> = ({ onOpenManager }) => {
 
   return (
     <div
-      className={`px-4 py-2 border rounded-2xl flex items-center justify-between shadow-lg transition-all mb-3 text-xs ${priorityStyles[broadcast.priority]}`}
+      className={`px-4 py-2 border rounded-2xl flex items-center justify-between shadow-lg transition-all mb-3 text-xs ${priorityStyles[broadcast.priority] || priorityStyles.NORMAL}`}
     >
       <div className="flex items-center space-x-3 overflow-hidden">
         <span
-          className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-bold flex items-center space-x-1 shrink-0 ${badgeStyles[broadcast.priority]}`}
+          className={`px-2 py-0.5 rounded-full text-[10px] uppercase font-bold flex items-center space-x-1 shrink-0 ${badgeStyles[broadcast.priority] || badgeStyles.NORMAL}`}
         >
           {broadcast.priority === 'URGENT' ? (
             <AlertCircle className="w-3 h-3" />

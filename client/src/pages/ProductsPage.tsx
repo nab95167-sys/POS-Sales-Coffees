@@ -21,21 +21,28 @@ export const ProductsPage: React.FC = () => {
     return matchesCat && matchesSearch;
   });
 
-  const handleSaveProduct = (productData: Partial<Product>) => {
-    if (editingProduct) {
-      updateProduct(editingProduct.id, productData);
-      setEditingProduct(null);
-      alert(`Product "${productData.name}" updated successfully!`);
-    } else {
-      addProduct(productData);
-      setShowAddModal(false);
-      alert(`New product "${productData.name}" added & synced live to POS Register!`);
+  const handleSaveProduct = async (productData: Partial<Product>) => {
+    try {
+      if (editingProduct) {
+        await updateProduct(editingProduct.id, productData);
+        setEditingProduct(null);
+        alert(`Product "${productData.name}" updated successfully!`);
+      } else {
+        await addProduct(productData);
+        setShowAddModal(false);
+        alert(`New product "${productData.name}" added & synced live to POS Register!`);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to save product.');
     }
   };
 
-  const handleDeleteProduct = (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete "${name}" from product catalog?`)) {
-      deleteProduct(id);
+  const handleDeleteProduct = async (id: string, name: string) => {
+    if (!confirm(`Are you sure you want to delete "${name}" from product catalog?`)) return;
+    try {
+      await deleteProduct(id);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete product.');
     }
   };
 
@@ -71,17 +78,15 @@ export const ProductsPage: React.FC = () => {
           </div>
 
           <button
-            onClick={() => {
-              if (confirm('Reload the full official 100-item artisan coffee & bakery catalog?')) {
-                resetToCatalog100();
-                alert('Successfully loaded 100 items into POS Catalog!');
-              }
+            onClick={async () => {
+              await resetToCatalog100();
+              alert('Synced live product catalog from database!');
             }}
             className="px-3 py-2 rounded-xl bg-stone-900 border border-amber-600/40 text-amber-300 hover:bg-stone-800 font-bold text-xs flex items-center space-x-1.5 transition-colors"
-            title="Reload full 100 items"
+            title="Sync catalog from database"
           >
             <Layers className="w-4 h-4 text-amber-400" />
-            <span className="hidden sm:inline">Load 100 Items</span>
+            <span className="hidden sm:inline">Sync Catalog</span>
           </button>
 
           <button

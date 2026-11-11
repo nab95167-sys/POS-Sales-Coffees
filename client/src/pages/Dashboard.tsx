@@ -1,19 +1,15 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  DollarSign, ShoppingBag, Users, AlertTriangle, TrendingUp, 
-  ArrowUpRight, Coffee, PackageCheck, Award, Globe, MapPin,
-  Receipt, Wallet, Sparkles, Megaphone, CheckCircle2, ChevronRight,
-  Target, ArrowDownRight, RefreshCw, BarChart2
+import {
+  DollarSign, ShoppingBag, AlertTriangle, TrendingUp, PackageCheck, Globe,
+  Receipt, Wallet, Sparkles, Megaphone, CheckCircle2, ChevronRight, Target, RefreshCw
 } from 'lucide-react';
-import { 
-  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, 
-  Tooltip, CartesianGrid, BarChart, Bar 
-} from 'recharts';
-import { SALES_ANALYTICS_DATA, INITIAL_INGREDIENTS } from '../services/mockData';
-import { getTotalExpensesToday } from '../services/expenseService';
-import { getTodaySalesMetrics } from '../services/orderService';
+import { ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from 'recharts';
+import { fetchExpenses, computeTodayExpenses } from '../services/expenseService';
+import { fetchOrders, computeTodayMetricsFromOrders } from '../services/orderService';
+import { apiFetch } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { Ingredient, Order, StoreSettings } from '../types';
 import { ZReportModal } from '../components/pos/ZReportModal';
 import { XReportModal } from '../components/pos/XReportModal';
 import { PettyCashModal } from '../components/finance/PettyCashModal';
@@ -21,9 +17,19 @@ import { PromotionManagerModal } from '../components/promotions/PromotionManager
 import { BroadcastModal } from '../components/ui/BroadcastModal';
 import { BroadcastBanner } from '../components/ui/BroadcastBanner';
 
+interface ShiftDTO {
+  id: string;
+  cashierName: string;
+  status: 'OPEN' | 'CLOSED';
+  startingFloat: number;
+  cashIn: number;
+  cashOut: number;
+  openedAt: string;
+}
+
 export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, hasGranularPermission } = useAuth();
 
   // Modals state
   const [showZReport, setShowZReport] = useState(false);
@@ -32,28 +38,109 @@ export const Dashboard: React.FC = () => {
   const [showPromoManager, setShowPromoManager] = useState(false);
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
 
-  // Dynamic Financial reconciliation numbers from actual orders
-  const metrics = getTodaySalesMetrics();
-  const dailyTarget = 1500.00;
-  const currentSales = metrics.netSales > 0 ? metrics.netSales : 1248.50;
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [pettyExpenses, setPettyExpenses] = useState(0);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+  const [currentShift, setCurrentShift] = useState<ShiftDTO | null>(null);
+  const [khrRate, setKhrRate] = useState(4100);
+  const [loading, setLoading] = useState(true);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [ordersList, expensesList, shiftRes, settingsRes, invRes] = await Promise.all([
+        fetchOrders({ limit: 500 }).catch(() => [] as Order[]),
+        fetchExpenses().catch(() => []),
+        apiFetch<{ currentShift: ShiftDTO | null }>('/api/v1/finance/shifts/current').catch(() => ({
+          currentShift: null,
+        })),
+        apiFetch<{ settings: StoreSettings }>('/api/v1/settings').catch(() => null),
+        hasGranularPermission('inventory:view')
+          ? apiFetch<{ ingredients: Ingredient[] }>('/api/v1/inventory').catch(() => ({ ingredients: [] }))
+          : Promise.resolve({ ingredients: [] as Ingredient[] }),
+      ]);
+
+      const rate = settingsRes?.settings?.khrExchangeRate || 4100;
+      setKhrRate(rate);
+      setOrders(ordersList);
+      setPettyExpenses(computeTodayExpenses(expensesList, rate));
+      setCurrentShift(shiftRes.currentShift);
+      setIngredients(invRes.ingredients);
+    } finally {
+      setLoading(false);
+    }
+  }, [hasGranularPermission]);
+
+  useEffect(() => {
+    void loadDashboard();
+    const refresh = () => void loadDashboard();
+    window.addEventListener('coffee_order_created', refresh);
+    window.addEventListener('coffee_order_refunded', refresh);
+    window.addEventListener('coffee_shift_updated', refresh);
+    return () => {
+      window.removeEventListener('coffee_order_created', refresh);
+      window.removeEventListener('coffee_order_refunded', refresh);
+      window.removeEventListener('coffee_shift_updated', refresh);
+    };
+  }, [loadDashboard]);
+
+  // Dynamic Financial reconciliation numbers from SQLite orders
+  const metrics = useMemo(() => computeTodayMetricsFromOrders(orders), [orders]);
+  const dailyTarget = 1500.0;
+  const currentSales = metrics.netSales;
   const targetPercent = Math.min(100, Math.round((currentSales / dailyTarget) * 100));
 
-  const cashSales = metrics.cashSales > 0 ? metrics.cashSales : 485.00;
-  const cashlessSales = metrics.cashlessSales > 0 ? metrics.cashlessSales : 763.00;
-  const pettyExpenses = getTotalExpensesToday();
-  const openingFloat = 100.00;
-  const netDrawerCash = openingFloat + cashSales - pettyExpenses;
+  const cashSales = metrics.cashSales;
+  const { khqrToday, cardToday } = useMemo(() => {
+    let khqr = 0;
+    let card = 0;
+    for (const o of metrics.todayOrders) {
+      if (o.splitPayments && o.splitPayments.length > 0) {
+        for (const sp of o.splitPayments) {
+          if (sp.method === 'CREDIT_CARD') card += sp.amount;
+          else if (sp.method !== 'CASH') khqr += sp.amount;
+        }
+      } else if (o.paymentMethod === 'CREDIT_CARD') {
+        card += o.totalAmount;
+      } else if (o.paymentMethod && o.paymentMethod !== 'CASH') {
+        khqr += o.totalAmount;
+      }
+    }
+    return { khqrToday: khqr, cardToday: card };
+  }, [metrics.todayOrders]);
 
-  const lowStockIngredients = INITIAL_INGREDIENTS.filter(i => i.currentStock <= i.minStockAlert);
+  const cashlessSales = metrics.cashlessSales;
+  const openingFloat = currentShift ? currentShift.startingFloat : 0;
+  const netDrawerCash = Math.max(0, openingFloat + cashSales - pettyExpenses);
 
-  const globalBranchPerformance = [
-    { branch: 'Phnom Penh 🇰🇭', revenue: 14262, orders: 1421, currency: 'USD' },
-    { branch: 'Bangkok 🇹🇭', revenue: 12850, orders: 1210, currency: 'USD' },
-    { branch: 'Singapore 🇸🇬', revenue: 18900, orders: 1650, currency: 'USD' },
-    { branch: 'Tokyo 🇯🇵', revenue: 21400, orders: 1890, currency: 'USD' },
-    { branch: 'London 🇬🇧', revenue: 16500, orders: 1340, currency: 'USD' },
-    { branch: 'New York 🇺🇸', revenue: 24800, orders: 2100, currency: 'USD' },
-  ];
+  const lowStockIngredients = ingredients.filter((i) => i.currentStock <= i.minStockAlert);
+  const avgTicket = metrics.orderCount > 0 ? metrics.netSales / metrics.orderCount : 0;
+  const totalRefundedToday = useMemo(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    return orders.filter((o) => o.createdAt.startsWith(todayStr) && o.isRefunded).length;
+  }, [orders]);
+
+  // Live 7-day sales trend chart from SQLite orders
+  const dailyChartData = useMemo(() => {
+    const days: Array<{ day: string; iso: string; revenue: number; orders: number }> = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+      days.push({ day: label, iso, revenue: 0, orders: 0 });
+    }
+    const dayMap = new Map(days.map((item) => [item.iso, item]));
+    for (const o of orders) {
+      if (o.isRefunded) continue;
+      const bucket = dayMap.get(o.createdAt.slice(0, 10));
+      if (bucket) {
+        bucket.revenue = Number((bucket.revenue + o.totalAmount).toFixed(2));
+        bucket.orders += 1;
+      }
+    }
+    return days;
+  }, [orders]);
 
   return (
     <div className="space-y-6 font-sans">
@@ -71,9 +158,17 @@ export const Dashboard: React.FC = () => {
                 Owner Command Center • មជ្ឈមណ្ឌលគ្រប់គ្រង
               </span>
               <span className="text-xs text-zinc-400">Branch #001 (Phnom Penh Main)</span>
+              <button
+                onClick={() => void loadDashboard()}
+                disabled={loading}
+                className="p-1 rounded-lg bg-zinc-800/80 text-zinc-400 hover:text-amber-300"
+                title="Refresh Dashboard"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              </button>
             </div>
             <h1 className="text-2xl font-black text-zinc-100 tracking-tight">
-              សួស្តី, {user?.name || 'Store Owner'} 👋
+              សួស្តី, {user?.name || 'Store Owner'}
             </h1>
             <p className="text-xs text-zinc-400 max-w-xl">
               ប្រព័ន្ធគ្រប់គ្រងហាងកាហ្វេឆ្លាតវៃ: តាមដានចំណូលលក់ របាយការណ៍បិទបញ្ជី Z-Report ចំណាយហាង និងការផ្សព្វផ្សាយក្នុងពេលជាក់ស្តែង។
@@ -161,10 +256,10 @@ export const Dashboard: React.FC = () => {
           </div>
           <div>
             <h3 className="text-3xl font-black text-amber-400 font-mono gold-gradient-text">${netDrawerCash.toFixed(2)}</h3>
-            <p className="text-[11px] text-zinc-400 font-mono mt-0.5">≈ {(netDrawerCash * 4100).toLocaleString()} ៛ KHR</p>
+            <p className="text-[11px] text-zinc-400 font-mono mt-0.5">≈ {Math.round(netDrawerCash * khrRate).toLocaleString()} ៛ KHR</p>
           </div>
           <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-400">
-            <span>Gross Cash: <strong className="text-zinc-200 font-mono">${cashSales.toFixed(2)}</strong></span>
+            <span>Float + Cash: <strong className="text-zinc-200 font-mono">${(openingFloat + cashSales).toFixed(2)}</strong></span>
             <span>Expenses: <strong className="text-red-400 font-mono">-${pettyExpenses.toFixed(2)}</strong></span>
           </div>
         </div>
@@ -178,12 +273,12 @@ export const Dashboard: React.FC = () => {
             </div>
           </div>
           <div>
-            <h3 className="text-3xl font-black text-blue-400 font-mono">$763.00</h3>
-            <p className="text-[11px] text-zinc-400 mt-0.5">ABA KHQR ($620.50) + Card ($142.50)</p>
+            <h3 className="text-3xl font-black text-blue-400 font-mono">${cashlessSales.toFixed(2)}</h3>
+            <p className="text-[11px] text-zinc-400 mt-0.5">KHQR/Wallet (${khqrToday.toFixed(2)}) + Card (${cardToday.toFixed(2)})</p>
           </div>
           <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-400">
-            <span>Auto-deposited into Bank</span>
-            <span className="text-emerald-400 font-bold">100% Reconciled</span>
+            <span>Today's Digital Settlement</span>
+            <span className="text-emerald-400 font-bold">SQLite Verified</span>
           </div>
         </div>
 
@@ -197,10 +292,14 @@ export const Dashboard: React.FC = () => {
           </div>
           <div>
             <h3 className="text-xl font-bold text-zinc-100 flex items-center space-x-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-              <span>Register Active</span>
+              <span className={`w-2.5 h-2.5 rounded-full ${currentShift ? 'bg-emerald-400' : 'bg-stone-500'}`}></span>
+              <span>{currentShift ? 'Shift Register Open' : 'No Active Shift'}</span>
             </h3>
-            <p className="text-[11px] text-zinc-400 mt-0.5">Morning Shift: 07:00 AM - 03:00 PM</p>
+            <p className="text-[11px] text-zinc-400 mt-0.5">
+              {currentShift
+                ? `${currentShift.cashierName} • Float $${currentShift.startingFloat.toFixed(2)}`
+                : 'Open a shift from POS Cash Drawer'}
+            </p>
           </div>
           <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-[11px] text-zinc-400">
             <span>Low Stock Items: <strong className="text-amber-400">{lowStockIngredients.length}</strong></span>
@@ -212,94 +311,100 @@ export const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Global Chain Performance */}
+      {/* Live Store Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="p-5 rounded-3xl bg-stone-900/80 border border-amber-700/30 glass-card shadow-xl space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Global Chain Sales Today</span>
+            <span className="text-xs font-semibold text-stone-400">Net Sales Today</span>
             <div className="w-8 h-8 rounded-2xl bg-amber-600/20 text-amber-400 flex items-center justify-center">
               <DollarSign className="w-4 h-4" />
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">$108,712.00</h3>
+            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">${metrics.netSales.toFixed(2)}</h3>
             <span className="text-xs font-bold text-emerald-400 flex items-center">
               <TrendingUp className="w-3.5 h-3.5 mr-1" />
-              +24.6%
+              Live
             </span>
           </div>
-          <p className="text-[11px] text-stone-500">Across 6 Worldwide Branches</p>
+          <p className="text-[11px] text-stone-500">Tax: ${metrics.taxCollected.toFixed(2)} • Disc: ${metrics.discounts.toFixed(2)}</p>
         </div>
 
         <div className="p-5 rounded-3xl bg-stone-900/80 border border-stone-800 glass-card shadow-xl space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Total Global Orders</span>
+            <span className="text-xs font-semibold text-stone-400">Completed Orders Today</span>
             <div className="w-8 h-8 rounded-2xl bg-blue-600/20 text-blue-400 flex items-center justify-center">
               <ShoppingBag className="w-4 h-4" />
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">9,611</h3>
-            <span className="text-xs font-bold text-emerald-400 flex items-center">
-              <TrendingUp className="w-3.5 h-3.5 mr-1" />
-              +12.8%
-            </span>
+            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">{metrics.orderCount}</h3>
+            <span className="text-xs font-bold text-blue-400">Voided: {totalRefundedToday}</span>
           </div>
-          <p className="text-[11px] text-stone-500">Avg ticket: $11.31 / order</p>
+          <p className="text-[11px] text-stone-500">Avg ticket: ${avgTicket.toFixed(2)} / order</p>
         </div>
 
         <div className="p-5 rounded-3xl bg-stone-900/80 border border-stone-800 glass-card shadow-xl space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Worldwide CRM Members</span>
+            <span className="text-xs font-semibold text-stone-400">Total Ledger Orders</span>
             <div className="w-8 h-8 rounded-2xl bg-purple-600/20 text-purple-400 flex items-center justify-center">
-              <Users className="w-4 h-4" />
+              <Globe className="w-4 h-4" />
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">48,920</h3>
-            <span className="text-xs font-bold text-purple-400">Global Gold Tier</span>
+            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">{orders.length}</h3>
+            <span className="text-xs font-bold text-purple-400">Branch #001</span>
           </div>
-          <p className="text-[11px] text-stone-500">840 new signups today</p>
+          <p className="text-[11px] text-stone-500">Stored in SQLite persistence</p>
         </div>
 
         <div className="p-5 rounded-3xl bg-stone-900/80 border border-stone-800 glass-card shadow-xl space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Branch Stock Warnings</span>
+            <span className="text-xs font-semibold text-stone-400">Low Stock Warnings</span>
             <div className="w-8 h-8 rounded-2xl bg-red-600/20 text-red-400 flex items-center justify-center">
               <AlertTriangle className="w-4 h-4" />
             </div>
           </div>
           <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-red-400 font-mono">2 Branches</h3>
-            <span className="text-xs font-bold text-red-400">Action Required</span>
+            <h3 className={`text-2xl font-extrabold font-mono ${lowStockIngredients.length > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+              {lowStockIngredients.length} Items
+            </h3>
+            <span className={`text-xs font-bold ${lowStockIngredients.length > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+              {lowStockIngredients.length > 0 ? 'Action Required' : 'Optimal'}
+            </span>
           </div>
-          <p className="text-[11px] text-stone-500">Phnom Penh & Bangkok low</p>
+          <p className="text-[11px] text-stone-500 truncate">
+            {lowStockIngredients.length > 0 ? lowStockIngredients.map((i) => i.name).join(', ') : 'All ingredients above threshold'}
+          </p>
         </div>
       </div>
 
-      {/* Worldwide Branch Sales Heatmap Comparison */}
+      {/* Live 7-Day Store Revenue Chart */}
       <div className="bg-stone-900/80 border border-stone-800 rounded-3xl p-6 glass-panel space-y-4">
         <div className="flex justify-between items-center">
           <div>
             <h3 className="text-lg font-bold text-stone-100 flex items-center space-x-2">
               <Globe className="w-5 h-5 text-amber-400" />
-              <span>Worldwide Branch Network Performance</span>
+              <span>7-Day Store Sales Performance (Branch #001)</span>
             </h3>
-            <p className="text-xs text-stone-400">Comparative gross sales volume across international locations</p>
+            <p className="text-xs text-stone-400">Real-time gross revenue aggregated directly from SQLite orders</p>
           </div>
-          <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/40 px-3 py-1 rounded-full border border-amber-900/40">
-            Top: New York 🇺🇸 ($24.8k)
-          </span>
+          <button
+            onClick={() => setShowXReport(true)}
+            className="text-xs font-mono font-bold text-amber-400 bg-amber-950/40 hover:bg-amber-900/40 px-3 py-1.5 rounded-full border border-amber-900/40"
+          >
+            Open Shift X-Report
+          </button>
         </div>
 
         <div className="h-72 w-full pt-4">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={globalBranchPerformance}>
+            <BarChart data={dailyChartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#292524" />
-              <XAxis dataKey="branch" stroke="#78716c" fontSize={11} />
+              <XAxis dataKey="day" stroke="#78716c" fontSize={11} />
               <YAxis stroke="#78716c" fontSize={11} />
               <Tooltip contentStyle={{ backgroundColor: '#1c1917', borderColor: '#78716c', borderRadius: '12px', color: '#f5f5f4' }} />
-              <Bar dataKey="revenue" fill="#C68E17" radius={[8, 8, 0, 0]} name="Gross Revenue ($ USD)" />
+              <Bar dataKey="revenue" fill="#C68E17" radius={[8, 8, 0, 0]} name="Net Revenue ($ USD)" />
             </BarChart>
           </ResponsiveContainer>
         </div>

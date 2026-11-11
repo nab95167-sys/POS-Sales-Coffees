@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
-import { X, ShieldCheck, Check, Save, Lock, UserCheck, RotateCcw, CheckSquare, Square, Edit3 } from 'lucide-react';
-import { Role } from '../../types';
+import React, { useEffect, useState } from 'react';
+import { X, ShieldCheck, Check, Save, Lock, Edit3 } from 'lucide-react';
+import { PermissionId, Role, RoleConfigDTO } from '../../types';
+import { apiFetch, ApiError } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import { soundEffects } from '../../services/soundService';
 
 interface Props {
   onClose: () => void;
+  onUpdated?: () => void;
 }
 
 export interface PermissionItem {
-  id: string;
+  id: PermissionId;
   category: 'POS Register' | 'Inventory & Recipes' | 'Reports & Finance' | 'Administration';
   name: string;
   description: string;
@@ -34,55 +37,75 @@ const DEFAULT_ROLE_NOTES: Record<Role, string> = {
   BARISTA: 'Kitchen Display System (KDS) order fulfillment, drink brewing, and recipe stock checks.',
 };
 
-const DEFAULT_ROLE_PERMS: Record<Role, string[]> = {
+const DEFAULT_ROLE_PERMS: Record<Role, PermissionId[]> = {
   ADMIN: PERMISSION_LIST.map((p) => p.id),
   MANAGER: [
     'pos:access', 'pos:discount', 'pos:void', 'pos:shift_manage',
-    'inventory:view', 'inventory:edit', 'reports:view', 'reports:export'
+    'inventory:view', 'inventory:edit', 'reports:view', 'reports:export',
   ],
-  CASHIER: ['pos:access', 'pos:discount', 'pos:shift_manage', 'inventory:view'],
+  CASHIER: ['pos:access', 'pos:shift_manage', 'inventory:view'],
   BARISTA: ['pos:access', 'inventory:view'],
 };
 
-export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
+export const RoleManagementModal: React.FC<Props> = ({ onClose, onUpdated }) => {
+  const { user, refreshUser } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
+
   const [selectedRole, setSelectedRole] = useState<Role>('CASHIER');
-
-  // Role notes state
-  const [roleNotes, setRoleNotes] = useState<Record<Role, string>>(() => {
-    const saved = localStorage.getItem('coffee_pos_role_notes');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return DEFAULT_ROLE_NOTES;
-  });
-
-  // Interactive Permission Matrix State
-  const [rolePermissions, setRolePermissions] = useState<Record<Role, string[]>>(() => {
-    const saved = localStorage.getItem('coffee_pos_rbac_permissions');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
-      }
-    }
-    return DEFAULT_ROLE_PERMS;
-  });
-
+  const [roleNotes, setRoleNotes] = useState<Record<Role, string>>(DEFAULT_ROLE_NOTES);
+  const [rolePermissions, setRolePermissions] = useState<Record<Role, PermissionId[]>>(DEFAULT_ROLE_PERMS);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
 
-  const handleTogglePermission = (permId: string) => {
+  useEffect(() => {
+    try {
+      localStorage.removeItem('coffee_pos_rbac_permissions');
+      localStorage.removeItem('coffee_pos_role_notes');
+    } catch {
+      // Ignore storage errors
+    }
+
+    let cancelled = false;
+    const loadRoles = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await apiFetch<{ roles: RoleConfigDTO[] }>('/api/v1/staff/roles');
+        if (cancelled) return;
+        const notesMap = { ...DEFAULT_ROLE_NOTES };
+        const permsMap = { ...DEFAULT_ROLE_PERMS };
+        for (const r of data.roles) {
+          notesMap[r.role] = r.notes;
+          permsMap[r.role] = r.permissions;
+        }
+        setRoleNotes(notesMap);
+        setRolePermissions(permsMap);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : 'Failed to load role matrix');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void loadRoles();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const canEditSelected = isAdmin && selectedRole !== 'ADMIN';
+
+  const handleTogglePermission = (permId: PermissionId) => {
+    if (!canEditSelected) return;
     setRolePermissions((prev) => {
       const currentList = prev[selectedRole] || [];
       const hasPerm = currentList.includes(permId);
       const updatedList = hasPerm
         ? currentList.filter((id) => id !== permId)
         : [...currentList, permId];
-
       return {
         ...prev,
         [selectedRole]: updatedList,
@@ -91,6 +114,7 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
   };
 
   const handleGrantAll = () => {
+    if (!canEditSelected) return;
     soundEffects.playBeep();
     setRolePermissions((prev) => ({
       ...prev,
@@ -99,6 +123,7 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
   };
 
   const handleRevokeAll = () => {
+    if (!canEditSelected) return;
     soundEffects.playBeep();
     setRolePermissions((prev) => ({
       ...prev,
@@ -107,6 +132,7 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
   };
 
   const handleResetDefaults = () => {
+    if (!isAdmin) return;
     if (confirm(`Reset ${selectedRole} permissions & note back to system factory defaults?`)) {
       soundEffects.playBeep();
       setRolePermissions((prev) => ({
@@ -120,12 +146,30 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
     }
   };
 
-  const handleSavePermissions = () => {
-    soundEffects.playSuccess();
-    localStorage.setItem('coffee_pos_rbac_permissions', JSON.stringify(rolePermissions));
-    localStorage.setItem('coffee_pos_role_notes', JSON.stringify(roleNotes));
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2000);
+  const handleSavePermissions = async () => {
+    if (!isAdmin) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const data = await apiFetch<{ role: RoleConfigDTO }>(`/api/v1/staff/roles/${selectedRole}`, {
+        method: 'PUT',
+        body: {
+          notes: roleNotes[selectedRole] || '',
+          permissions: rolePermissions[selectedRole] || [],
+        },
+      });
+      setRoleNotes((prev) => ({ ...prev, [selectedRole]: data.role.notes }));
+      setRolePermissions((prev) => ({ ...prev, [selectedRole]: data.role.permissions }));
+      soundEffects.playSuccess();
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2000);
+      await refreshUser();
+      onUpdated?.();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to save role policy');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const categories = ['POS Register', 'Inventory & Recipes', 'Reports & Finance', 'Administration'] as const;
@@ -143,10 +187,10 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
               <h3 className="text-lg font-bold text-stone-100 flex items-center space-x-2">
                 <span>Role Matrix & Permissions</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-amber-950/60 text-amber-400 border border-amber-700/40 font-mono">
-                  RBAC Security
+                  Server-Enforced RBAC
                 </span>
               </h3>
-              <p className="text-xs text-stone-400">Configure feature access, privileges & role operational notes</p>
+              <p className="text-xs text-stone-400">Configure feature access, privileges & role operational notes in SQLite</p>
             </div>
           </div>
           <button
@@ -176,55 +220,74 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
           </div>
 
           <div className="flex items-center space-x-2">
-            <button
-              onClick={handleSavePermissions}
-              className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-1.5 transition-colors shadow-md"
-            >
-              {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
-              <span>{isSaved ? 'រក្សាទុកជោគជ័យ!' : 'Save Role Matrix'}</span>
-            </button>
+            {isAdmin ? (
+              <button
+                onClick={() => void handleSavePermissions()}
+                disabled={saving || loading}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-stone-950 font-bold text-xs flex items-center space-x-1.5 transition-colors shadow-md"
+              >
+                {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+                <span>{saving ? 'Saving...' : isSaved ? 'រក្សាទុកជោគជ័យ!' : 'Save Role Matrix'}</span>
+              </button>
+            ) : (
+              <span className="px-3 py-1.5 rounded-xl bg-stone-900 border border-stone-700 text-stone-400 text-[11px] font-semibold flex items-center space-x-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Admin Read-Only Policy</span>
+              </span>
+            )}
           </div>
         </div>
 
+        {error && (
+          <div className="mx-6 mt-3 p-2.5 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 text-xs font-semibold">
+            {error}
+          </div>
+        )}
+
         {/* Role Note & Quick Permission Toggles */}
         <div className="p-4 bg-stone-950/40 border-b border-stone-800/80 space-y-2.5">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <label className="text-xs font-bold text-stone-300 flex items-center space-x-1.5">
               <Edit3 className="w-3.5 h-3.5 text-amber-400" />
               <span>Role Operational Note / Description for {selectedRole}:</span>
             </label>
 
-            <div className="flex items-center space-x-1.5 text-xs">
-              <button
-                type="button"
-                onClick={handleGrantAll}
-                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-emerald-400 text-[11px] font-semibold transition-colors"
-                title="Grant all permissions to this role"
-              >
-                Grant All
-              </button>
-              <button
-                type="button"
-                onClick={handleRevokeAll}
-                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-red-400 text-[11px] font-semibold transition-colors"
-                title="Revoke all permissions from this role"
-              >
-                Clear All
-              </button>
-              <button
-                type="button"
-                onClick={handleResetDefaults}
-                className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-400 text-[11px] font-semibold transition-colors"
-                title="Reset to default permissions"
-              >
-                Reset Default
-              </button>
-            </div>
+            {isAdmin && (
+              <div className="flex items-center space-x-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={handleGrantAll}
+                  disabled={!canEditSelected}
+                  className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 disabled:opacity-40 text-emerald-400 text-[11px] font-semibold transition-colors"
+                  title="Grant all permissions to this role"
+                >
+                  Grant All
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRevokeAll}
+                  disabled={!canEditSelected}
+                  className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 disabled:opacity-40 text-red-400 text-[11px] font-semibold transition-colors"
+                  title="Revoke all permissions from this role"
+                >
+                  Clear All
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetDefaults}
+                  className="px-2.5 py-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-400 text-[11px] font-semibold transition-colors"
+                  title="Reset to default permissions"
+                >
+                  Reset Default
+                </button>
+              </div>
+            )}
           </div>
 
           <input
             type="text"
             value={roleNotes[selectedRole] || ''}
+            disabled={!isAdmin}
             onChange={(e) =>
               setRoleNotes((prev) => ({
                 ...prev,
@@ -232,50 +295,61 @@ export const RoleManagementModal: React.FC<Props> = ({ onClose }) => {
               }))
             }
             placeholder="Add operational notes or duty scope for this role..."
-            className="w-full px-3.5 py-2 rounded-xl glass-input text-xs text-stone-200 focus:outline-none focus:border-amber-500 placeholder-stone-600"
+            className="w-full px-3.5 py-2 rounded-xl glass-input text-xs text-stone-200 focus:outline-none focus:border-amber-500 placeholder-stone-600 disabled:opacity-60"
           />
+          {selectedRole === 'ADMIN' && (
+            <p className="text-[11px] text-amber-400/80">
+              Administrator always retains full system permissions on the server.
+            </p>
+          )}
         </div>
 
         {/* Permission List Grid */}
         <div className="p-6 max-h-[50vh] overflow-y-auto space-y-6">
-          {categories.map((cat) => {
-            const catPerms = PERMISSION_LIST.filter((p) => p.category === cat);
-            return (
-              <div key={cat} className="space-y-3">
-                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-stone-800 pb-1">
-                  {cat}
-                </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {catPerms.map((perm) => {
-                    const isChecked = rolePermissions[selectedRole]?.includes(perm.id);
+          {loading ? (
+            <div className="py-8 text-center text-xs text-stone-400">Loading role policies...</div>
+          ) : (
+            categories.map((cat) => {
+              const catPerms = PERMISSION_LIST.filter((p) => p.category === cat);
+              return (
+                <div key={cat} className="space-y-3">
+                  <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider border-b border-stone-800 pb-1">
+                    {cat}
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {catPerms.map((perm) => {
+                      const isChecked = rolePermissions[selectedRole]?.includes(perm.id) ?? false;
 
-                    return (
-                      <label
-                        key={perm.id}
-                        onClick={() => handleTogglePermission(perm.id)}
-                        className={`p-3.5 rounded-2xl border flex items-start space-x-3 cursor-pointer transition-all ${
-                          isChecked
-                            ? 'bg-amber-950/40 border-amber-600/60 text-stone-100'
-                            : 'bg-stone-950/60 border-stone-800 text-stone-500 hover:border-stone-700'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => {}}
-                          className="mt-0.5 rounded border-stone-700 text-amber-600 focus:ring-amber-500"
-                        />
-                        <div className="space-y-0.5">
-                          <span className="text-xs font-bold block text-stone-200">{perm.name}</span>
-                          <span className="text-[11px] text-stone-400 block leading-snug">{perm.description}</span>
-                        </div>
-                      </label>
-                    );
-                  })}
+                      return (
+                        <label
+                          key={perm.id}
+                          className={`p-3.5 rounded-2xl border flex items-start space-x-3 transition-all ${
+                            canEditSelected ? 'cursor-pointer' : 'cursor-not-allowed opacity-75'
+                          } ${
+                            isChecked
+                              ? 'bg-amber-950/40 border-amber-600/60 text-stone-100'
+                              : 'bg-stone-950/60 border-stone-800 text-stone-500 hover:border-stone-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            disabled={!canEditSelected}
+                            onChange={() => handleTogglePermission(perm.id)}
+                            className="mt-0.5 rounded border-stone-700 text-amber-600 focus:ring-amber-500"
+                          />
+                          <div className="space-y-0.5">
+                            <span className="text-xs font-bold block text-stone-200">{perm.name}</span>
+                            <span className="text-[11px] text-stone-400 block leading-snug">{perm.description}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
 
         {/* Footer */}

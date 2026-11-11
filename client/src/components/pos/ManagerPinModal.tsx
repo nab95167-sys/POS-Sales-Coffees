@@ -1,14 +1,14 @@
 import React, { useState } from 'react';
-import { X, ShieldAlert, Check, Delete, Lock } from 'lucide-react';
+import { X, ShieldAlert, Delete } from 'lucide-react';
 import { soundEffects } from '../../services/soundService';
-import { logSecurityEvent } from '../../services/securityAuditService';
+import { apiFetch } from '../../services/api';
 
 interface Props {
   actionTitle: string;
   actionDetails: string;
-  onSuccess: () => void;
+  onSuccess: (overrideToken?: string) => void;
   onClose: () => void;
-  performedBy: string;
+  performedBy?: string;
 }
 
 export const ManagerPinModal: React.FC<Props> = ({
@@ -16,52 +16,64 @@ export const ManagerPinModal: React.FC<Props> = ({
   actionDetails,
   onSuccess,
   onClose,
-  performedBy,
 }) => {
   const [pin, setPin] = useState('');
-  const [error, setError] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const handleKeyPress = (num: string) => {
+    if (isVerifying) return;
     soundEffects.playBeep();
-    setError(false);
+    setErrorMsg('');
     if (pin.length < 4) {
       const nextPin = pin + num;
       setPin(nextPin);
       if (nextPin.length === 4) {
-        verifyPin(nextPin);
+        void verifyPin(nextPin);
       }
     }
   };
 
   const handleBackspace = () => {
+    if (isVerifying) return;
     soundEffects.playBeep();
-    setError(false);
+    setErrorMsg('');
     setPin((prev) => prev.slice(0, -1));
   };
 
   const handleClear = () => {
+    if (isVerifying) return;
     soundEffects.playBeep();
     setPin('');
-    setError(false);
+    setErrorMsg('');
   };
 
-  const verifyPin = (enteredPin: string) => {
-    // Default Manager PIN is 1234
-    if (enteredPin === '1234') {
+  const verifyPin = async (enteredPin: string) => {
+    setIsVerifying(true);
+    try {
+      const res = await apiFetch<{
+        authorized: boolean;
+        authorizerName: string;
+        authorizerRole: string;
+        overrideToken?: string;
+      }>('/api/v1/security/verify-pin', {
+        method: 'POST',
+        body: {
+          pin: enteredPin,
+          purpose: 'MANAGER_OVERRIDE',
+          actionTitle,
+          actionDetails,
+        },
+        skipAuthRefresh: true,
+      });
       soundEffects.playCashRegister();
-      logSecurityEvent(
-        'DISCOUNT_OVERRIDE',
-        actionTitle,
-        `${actionDetails} (Approved by Manager PIN)`,
-        performedBy,
-        'Manager (PIN: 1234)',
-        'WARNING'
-      );
-      onSuccess();
-    } else {
-      setError(true);
+      onSuccess(res.overrideToken);
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Incorrect Manager PIN.');
       setPin('');
       soundEffects.playBeep();
+    } finally {
+      setIsVerifying(false);
     }
   };
 
@@ -76,7 +88,7 @@ export const ManagerPinModal: React.FC<Props> = ({
             </div>
             <div>
               <h3 className="text-sm font-bold text-stone-100">Manager Authorization</h3>
-              <p className="text-[10px] text-amber-400 font-medium">Security PIN Required</p>
+              <p className="text-[10px] text-amber-400 font-medium">Server-Verified PIN Override</p>
             </div>
           </div>
           <button
@@ -102,7 +114,7 @@ export const ManagerPinModal: React.FC<Props> = ({
                 <div
                   key={idx}
                   className={`w-4 h-4 rounded-full border-2 transition-all duration-200 ${
-                    error
+                    errorMsg
                       ? 'bg-red-500 border-red-400 animate-pulse'
                       : pin.length > idx
                       ? 'bg-amber-400 border-amber-300 scale-125 shadow-lg shadow-amber-400/50'
@@ -111,9 +123,11 @@ export const ManagerPinModal: React.FC<Props> = ({
                 />
               ))}
             </div>
-            {error && (
-              <p className="text-[11px] font-bold text-red-400 animate-bounce">
-                Incorrect Manager PIN! Try again.
+            {errorMsg ? (
+              <p className="text-[11px] font-bold text-red-400">{errorMsg}</p>
+            ) : (
+              <p className="text-[11px] text-stone-400">
+                {isVerifying ? 'Verifying with security server...' : 'Enter Manager or Admin PIN'}
               </p>
             )}
           </div>
@@ -123,34 +137,34 @@ export const ManagerPinModal: React.FC<Props> = ({
             {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
               <button
                 key={digit}
+                disabled={isVerifying}
                 onClick={() => handleKeyPress(digit)}
-                className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 text-stone-100 font-mono text-lg font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
+                className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 disabled:opacity-50 text-stone-100 font-mono text-lg font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
               >
                 {digit}
               </button>
             ))}
             <button
+              disabled={isVerifying}
               onClick={handleClear}
               className="py-3.5 rounded-2xl bg-stone-950 hover:bg-stone-800 text-stone-400 font-bold text-xs uppercase transition-all"
             >
               Clear
             </button>
             <button
+              disabled={isVerifying}
               onClick={() => handleKeyPress('0')}
-              className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 text-stone-100 font-mono text-lg font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
+              className="py-3.5 rounded-2xl bg-stone-800/80 hover:bg-stone-700 disabled:opacity-50 text-stone-100 font-mono text-lg font-bold shadow-md transition-all active:scale-95 border border-stone-700/60"
             >
               0
             </button>
             <button
+              disabled={isVerifying}
               onClick={handleBackspace}
               className="py-3.5 rounded-2xl bg-stone-950 hover:bg-stone-800 text-stone-400 flex items-center justify-center transition-all"
             >
               <Delete className="w-5 h-5" />
             </button>
-          </div>
-
-          <div className="pt-2 text-[10px] text-stone-500 font-mono">
-            Demo Manager PIN: <span className="text-amber-400 font-bold">1234</span>
           </div>
         </div>
       </div>

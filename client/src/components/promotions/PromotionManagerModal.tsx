@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
-import { X, Sparkles, Tag, Clock, Calendar, Check, Power, Plus, ShieldCheck } from 'lucide-react';
-import { Promotion, getPromotions, togglePromotion, isPromotionTimeActive } from '../../services/promotionService';
+import React, { useEffect, useState } from 'react';
+import { X, Sparkles, Tag, Clock, Check, Power, ShieldCheck } from 'lucide-react';
+import {
+  Promotion,
+  fetchPromotions,
+  togglePromotionApi,
+  isPromotionTimeActive,
+} from '../../services/promotionService';
+import { useAuth } from '../../context/AuthContext';
+import { ApiError } from '../../services/api';
 import { soundEffects } from '../../services/soundService';
 
 interface Props {
@@ -9,13 +16,46 @@ interface Props {
 }
 
 export const PromotionManagerModal: React.FC<Props> = ({ onClose, onApplyToCart }) => {
-  const [promotions, setPromotions] = useState<Promotion[]>(() => getPromotions());
+  const { hasGranularPermission } = useAuth();
+  const canManagePromos = hasGranularPermission('pos:discount');
+
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const now = new Date();
 
-  const handleToggle = (id: string) => {
-    soundEffects.playBeep();
-    const updated = togglePromotion(id);
-    setPromotions(updated);
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const list = await fetchPromotions();
+        if (!cancelled) setPromotions(list);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : 'Failed to load promotions');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleToggle = async (id: string) => {
+    if (!canManagePromos) return;
+    setError(null);
+    try {
+      const updated = await togglePromotionApi(id);
+      soundEffects.playBeep();
+      setPromotions((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to toggle promotion');
+    }
   };
 
   const handleApply = (promo: Promotion) => {
@@ -42,7 +82,7 @@ export const PromotionManagerModal: React.FC<Props> = ({ onClose, onApplyToCart 
                   កម្មវិធីបញ្ចុះតម្លៃ
                 </span>
               </h2>
-              <p className="text-xs text-stone-400">Automated discounts, happy hour schedules & combo offers</p>
+              <p className="text-xs text-stone-400">Server-verified happy hour campaigns & promo eligibility</p>
             </div>
           </div>
           <button
@@ -60,105 +100,123 @@ export const PromotionManagerModal: React.FC<Props> = ({ onClose, onApplyToCart 
             <span>Store Time: <strong className="text-stone-200 font-mono">{now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong></span>
           </span>
           <span className="text-[11px] text-amber-400/90 font-medium">
-            Active campaigns evaluate automatically at checkout
+            Campaign rules enforced server-side during order checkout
           </span>
         </div>
 
+        {error && (
+          <div className="mx-6 mt-3 p-2.5 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 text-xs font-semibold">
+            {error}
+          </div>
+        )}
+
         {/* Promotions List */}
         <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
-          {promotions.map((promo) => {
-            const isLive = isPromotionTimeActive(promo, now);
+          {loading ? (
+            <div className="py-10 text-center text-stone-400 text-xs">Loading promotions...</div>
+          ) : promotions.length === 0 ? (
+            <div className="py-10 text-center text-stone-500 text-xs">No promotions configured.</div>
+          ) : (
+            promotions.map((promo) => {
+              const isLive = isPromotionTimeActive(promo, now);
 
-            return (
-              <div
-                key={promo.id}
-                className={`p-4 rounded-2xl border transition-all ${
-                  !promo.isActive
-                    ? 'bg-stone-950/40 border-stone-800/60 opacity-60'
-                    : isLive
-                    ? 'bg-gradient-to-r from-amber-950/30 to-stone-900 border-amber-600/50 shadow-lg shadow-amber-950/20'
-                    : 'bg-stone-900/90 border-stone-800'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 space-y-1">
-                    <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                      <span className="font-bold text-sm text-stone-100">{promo.nameKh}</span>
-                      <span className="text-xs text-stone-400">({promo.name})</span>
+              return (
+                <div
+                  key={promo.id}
+                  className={`p-4 rounded-2xl border transition-all ${
+                    !promo.isActive
+                      ? 'bg-stone-950/40 border-stone-800/60 opacity-60'
+                      : isLive
+                      ? 'bg-gradient-to-r from-amber-950/30 to-stone-900 border-amber-600/50 shadow-lg shadow-amber-950/20'
+                      : 'bg-stone-900/90 border-stone-800'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                        <span className="font-bold text-sm text-stone-100">{promo.nameKh}</span>
+                        <span className="text-xs text-stone-400">({promo.name})</span>
 
-                      {/* Live Status Badge */}
-                      {promo.isActive ? (
-                        isLive ? (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-600/40 flex items-center space-x-1 animate-pulse">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            <span>កំពុងដំណើរការ (LIVE NOW)</span>
-                          </span>
+                        {/* Live Status Badge */}
+                        {promo.isActive ? (
+                          isLive ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-600/40 flex items-center space-x-1 animate-pulse">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                              <span>កំពុងដំណើរការ (LIVE NOW)</span>
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-950/60 text-amber-300 border border-amber-700/40">
+                              {promo.badge}
+                            </span>
+                          )
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-950/60 text-amber-300 border border-amber-700/40">
-                            {promo.badge}
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-stone-800 text-stone-400">
+                            បិទ (Disabled)
                           </span>
-                        )
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-stone-800 text-stone-400">
-                          បិទ (Disabled)
+                        )}
+                      </div>
+
+                      <p className="text-xs text-stone-300">{promo.descriptionKh}</p>
+                      <p className="text-[11px] text-stone-400">{promo.description}</p>
+
+                      <div className="pt-2 flex items-center space-x-4 text-[11px] text-stone-400">
+                        <span className="flex items-center space-x-1">
+                          <Tag className="w-3 h-3 text-amber-400" />
+                          <span className="text-stone-300 font-bold font-mono">
+                            {promo.type === 'PERCENT' || promo.type === 'HAPPY_HOUR'
+                              ? `${promo.value}% OFF`
+                              : `$${promo.value.toFixed(2)} OFF`}
+                          </span>
                         </span>
-                      )}
+                        {promo.startHour !== undefined && (
+                          <span className="flex items-center space-x-1">
+                            <Clock className="w-3 h-3 text-blue-400" />
+                            <span>
+                              {promo.startHour}:00 - {promo.endHour}:00
+                            </span>
+                          </span>
+                        )}
+                        {promo.minSpend && (
+                          <span className="flex items-center space-x-1">
+                            <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                            <span>Min Spend: ${promo.minSpend.toFixed(2)}</span>
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <p className="text-xs text-stone-300">{promo.descriptionKh}</p>
-                    <p className="text-[11px] text-stone-400">{promo.description}</p>
-
-                    <div className="pt-2 flex items-center space-x-4 text-[11px] text-stone-400">
-                      <span className="flex items-center space-x-1">
-                        <Tag className="w-3 h-3 text-amber-400" />
-                        <span className="text-stone-300 font-bold font-mono">
-                          {promo.type === 'PERCENT' || promo.type === 'HAPPY_HOUR' ? `${promo.value}% OFF` : `$${promo.value.toFixed(2)} OFF`}
-                        </span>
-                      </span>
-                      {promo.startHour !== undefined && (
-                        <span className="flex items-center space-x-1">
-                          <Clock className="w-3 h-3 text-blue-400" />
-                          <span>{promo.startHour}:00 - {promo.endHour}:00</span>
-                        </span>
+                    {/* Actions */}
+                    <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-2">
+                      {onApplyToCart && promo.isActive && (
+                        <button
+                          onClick={() => handleApply(promo)}
+                          className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 text-xs font-bold transition-all shadow-md flex items-center space-x-1"
+                          title="Apply this promotion to active cart right now"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>អនុវត្ត (Apply)</span>
+                        </button>
                       )}
-                      {promo.minSpend && (
-                        <span className="flex items-center space-x-1">
-                          <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                          <span>Min Spend: ${promo.minSpend.toFixed(2)}</span>
-                        </span>
+
+                      {canManagePromos && (
+                        <button
+                          onClick={() => void handleToggle(promo.id)}
+                          className={`p-2 rounded-xl border transition-colors ${
+                            promo.isActive
+                              ? 'bg-stone-800 hover:bg-red-950/40 text-stone-300 hover:text-red-400 border-stone-700 hover:border-red-600/40'
+                              : 'bg-emerald-950/40 text-emerald-400 border-emerald-600/40 hover:bg-emerald-900/40'
+                          }`}
+                          title={promo.isActive ? 'Disable promotion' : 'Enable promotion'}
+                        >
+                          <Power className="w-4 h-4" />
+                        </button>
                       )}
                     </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex flex-col sm:flex-row items-center space-y-2 sm:space-y-0 sm:space-x-2">
-                    {onApplyToCart && promo.isActive && (
-                      <button
-                        onClick={() => handleApply(promo)}
-                        className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 text-xs font-bold transition-all shadow-md flex items-center space-x-1"
-                        title="Apply this promotion to active cart right now"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>អនុវត្ត (Apply)</span>
-                      </button>
-                    )}
-
-                    <button
-                      onClick={() => handleToggle(promo.id)}
-                      className={`p-2 rounded-xl border transition-colors ${
-                        promo.isActive
-                          ? 'bg-stone-800 hover:bg-red-950/40 text-stone-300 hover:text-red-400 border-stone-700 hover:border-red-600/40'
-                          : 'bg-emerald-950/40 text-emerald-400 border-emerald-600/40 hover:bg-emerald-900/40'
-                      }`}
-                      title={promo.isActive ? 'Disable promotion' : 'Enable promotion'}
-                    >
-                      <Power className="w-4 h-4" />
-                    </button>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          )}
         </div>
 
         {/* Footer */}

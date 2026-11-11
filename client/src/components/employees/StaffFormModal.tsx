@@ -1,15 +1,28 @@
-import React, { useState, useEffect } from 'react';
-import { X, User, Mail, Phone, Shield, Clock, Check, Save, KeyRound, AlertTriangle } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, User, Mail, Phone, Shield, Clock, Save, KeyRound, Lock } from 'lucide-react';
 import { StaffMember, Role } from '../../types';
-import { soundEffects } from '../../services/soundService';
+import { useAuth } from '../../context/AuthContext';
+
+export interface StaffFormPayload {
+  name: string;
+  email: string;
+  phone: string;
+  role: Role;
+  shift: 'Morning' | 'Afternoon' | 'Evening';
+  status: 'Active' | 'On Leave' | 'Inactive';
+  password?: string;
+  pin?: string;
+}
 
 interface Props {
   staff?: StaffMember | null;
   onClose: () => void;
-  onSave: (staffData: Partial<StaffMember>) => void;
+  onSave: (staffData: StaffFormPayload) => Promise<void>;
 }
 
 export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'ADMIN';
   const isEditing = Boolean(staff);
 
   const [name, setName] = useState(staff?.name || '');
@@ -18,22 +31,59 @@ export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
   const [role, setRole] = useState<Role>(staff?.role || 'CASHIER');
   const [shift, setShift] = useState<'Morning' | 'Afternoon' | 'Evening'>(staff?.shift || 'Morning');
   const [status, setStatus] = useState<'Active' | 'On Leave' | 'Inactive'>(staff?.status || 'Active');
+  const [password, setPassword] = useState('');
+  const [pin, setPin] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    setError(null);
 
-    soundEffects.playSuccess();
-    onSave({
-      name: name.trim(),
-      email: email.trim() || `${name.toLowerCase().replace(/\s+/g, '')}@coffeepos.com`,
-      phone: phone.trim(),
-      role,
-      shift,
-      status,
-    });
-    onClose();
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    if (!trimmedName) {
+      setError('Full name is required');
+      return;
+    }
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      setError('Valid email address is required');
+      return;
+    }
+    if (!isEditing && password.length < 8) {
+      setError('Initial password must be at least 8 characters');
+      return;
+    }
+    if (isEditing && password && password.length < 8) {
+      setError('New password must be at least 8 characters');
+      return;
+    }
+    if (pin && !/^\d{4,6}$/.test(pin)) {
+      setError('Security PIN must be 4 to 6 numeric digits');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onSave({
+        name: trimmedName,
+        email: trimmedEmail,
+        phone: phone.trim(),
+        role,
+        shift,
+        status,
+        ...(password ? { password } : {}),
+        ...(pin ? { pin } : {}),
+      });
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save staff account');
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  const canModifyTargetRole = isAdmin || staff?.role !== 'ADMIN';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md font-sans">
@@ -52,7 +102,7 @@ export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
                 </span>
               </h2>
               <p className="text-xs text-stone-400">
-                {isEditing ? `Update details, role, and shift for ${staff?.name}` : 'Create a new employee profile with role & shift assignments'}
+                {isEditing ? `Update account details & credentials for ${staff?.name}` : 'Create an employee login with role, shift & bcrypt credentials'}
               </p>
             </div>
           </div>
@@ -65,7 +115,13 @@ export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <form onSubmit={(e) => void handleSubmit(e)} className="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+          {error && (
+            <div className="p-3 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 text-xs font-semibold">
+              {error}
+            </div>
+          )}
+
           {/* Full Name */}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-stone-300 flex items-center space-x-1.5">
@@ -87,10 +143,11 @@ export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
             <div className="space-y-1">
               <label className="text-xs font-semibold text-stone-300 flex items-center space-x-1.5">
                 <Mail className="w-3.5 h-3.5 text-amber-400" />
-                <span>Email Address (អ៊ីមែល)</span>
+                <span>Login Email (អ៊ីមែល) *</span>
               </label>
               <input
                 type="email"
+                required
                 placeholder="staff@coffeepos.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -113,6 +170,41 @@ export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
             </div>
           </div>
 
+          {/* Credentials: Password & Security PIN */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-300 flex items-center space-x-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>{isEditing ? 'Reset Password (Optional)' : 'Password (Min 8 chars) *'}</span>
+              </label>
+              <input
+                type="password"
+                required={!isEditing}
+                minLength={isEditing ? undefined : 8}
+                placeholder={isEditing ? 'Leave blank to keep current' : 'Min 8 characters'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs text-stone-100 focus:outline-none focus:border-amber-500 placeholder-stone-500"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-stone-300 flex items-center space-x-1.5">
+                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                <span>{isEditing ? 'New PIN (4-6 digits)' : 'Security PIN (Optional)'}</span>
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder={isEditing ? 'Leave blank to keep PIN' : 'e.g. 4-6 digits'}
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+                className="w-full px-3.5 py-2.5 rounded-xl glass-input text-xs text-stone-100 focus:outline-none focus:border-amber-500 placeholder-stone-500"
+              />
+            </div>
+          </div>
+
           {/* Role Selection */}
           <div className="space-y-1">
             <label className="text-xs font-semibold text-stone-300 flex items-center space-x-1.5">
@@ -120,20 +212,24 @@ export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
               <span>Assigned Role (តួនាទី) *</span>
             </label>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {(['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'] as Role[]).map((r) => (
-                <button
-                  type="button"
-                  key={r}
-                  onClick={() => setRole(r)}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all border ${
-                    role === r
-                      ? 'bg-amber-600 text-stone-950 border-amber-500 shadow-md font-black'
-                      : 'bg-stone-950/60 border-stone-800 text-stone-400 hover:text-stone-200'
-                  }`}
-                >
-                  {r}
-                </button>
-              ))}
+              {(['ADMIN', 'MANAGER', 'CASHIER', 'BARISTA'] as Role[]).map((r) => {
+                const disabled = (r === 'ADMIN' && !isAdmin) || !canModifyTargetRole;
+                return (
+                  <button
+                    type="button"
+                    key={r}
+                    disabled={disabled}
+                    onClick={() => setRole(r)}
+                    className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all border disabled:opacity-40 disabled:cursor-not-allowed ${
+                      role === r
+                        ? 'bg-amber-600 text-stone-950 border-amber-500 shadow-md font-black'
+                        : 'bg-stone-950/60 border-stone-800 text-stone-400 hover:text-stone-200'
+                    }`}
+                  >
+                    {r}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -198,10 +294,11 @@ export const StaffFormModal: React.FC<Props> = ({ staff, onClose, onSave }) => {
 
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-900/40 transition-all hover:scale-[1.02]"
+              disabled={submitting}
+              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:opacity-50 text-stone-950 font-bold text-xs flex items-center space-x-1.5 shadow-lg shadow-amber-900/40 transition-all hover:scale-[1.02]"
             >
               <Save className="w-4 h-4" />
-              <span>{isEditing ? 'រក្សាទុកការកែប្រែ (Update Staff)' : 'បន្ថែមបុគ្គលិក (Create Staff)'}</span>
+              <span>{submitting ? 'Saving...' : isEditing ? 'រក្សាទុកការកែប្រែ (Update Staff)' : 'បន្ថែមបុគ្គលិក (Create Staff)'}</span>
             </button>
           </div>
         </form>

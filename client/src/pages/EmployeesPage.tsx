@@ -1,28 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  ShieldAlert, Plus, Users, Clock, Shield, Award, CheckCircle2, 
-  XCircle, Settings, Key, Search, Edit3, Trash2, Filter, Phone, Mail,
-  ChevronDown, MoreVertical, UserCheck, Sparkles, X, Coffee
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  ShieldAlert, Plus, Users, Clock, Shield, Settings, Key, Search, Edit3, Trash2,
+  Phone, Mail, ChevronDown, X, Coffee, RefreshCw
 } from 'lucide-react';
 import { StaffMember, Role } from '../types';
-import { INITIAL_STAFF } from '../services/mockData';
+import { apiFetch, ApiError } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { RoleManagementModal } from '../components/employees/RoleManagementModal';
 import { UserPermissionModal } from '../components/employees/UserPermissionModal';
-import { StaffFormModal } from '../components/employees/StaffFormModal';
+import { StaffFormModal, StaffFormPayload } from '../components/employees/StaffFormModal';
 import { soundEffects } from '../services/soundService';
 
-const STORAGE_KEY = 'coffee_pos_staff_members';
-
 export const EmployeesPage: React.FC = () => {
-  const [staffList, setStaffList] = useState<StaffMember[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch (e) {
-      console.error('Failed to parse staff', e);
-    }
-    return INITIAL_STAFF;
-  });
+  const { user, hasGranularPermission, refreshUser } = useAuth();
+  const canManageStaff = hasGranularPermission('staff:manage');
+
+  const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<'ALL' | Role>('ALL');
@@ -40,10 +35,27 @@ export const EmployeesPage: React.FC = () => {
     staff: null,
   });
 
-  // Persist staffList changes
+  const loadStaff = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await apiFetch<{ staff: StaffMember[] }>('/api/v1/staff');
+      setStaffList(data.staff);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load staff directory');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(staffList));
-  }, [staffList]);
+    try {
+      localStorage.removeItem('coffee_pos_staff_members');
+    } catch {
+      // Ignore storage errors
+    }
+    void loadStaff();
+  }, [loadStaff]);
 
   // Click outside listener for action dropdown
   useEffect(() => {
@@ -86,49 +98,62 @@ export const EmployeesPage: React.FC = () => {
   const frontlineCount = staffList.filter((s) => s.role === 'CASHIER' || s.role === 'BARISTA').length;
 
   // Handle Save (Create or Update)
-  const handleSaveStaff = (data: Partial<StaffMember>) => {
+  const handleSaveStaff = async (data: StaffFormPayload) => {
+    setError(null);
     if (staffModalData.staff) {
-      setStaffList((prev) =>
-        prev.map((s) => (s.id === staffModalData.staff!.id ? ({ ...s, ...data } as StaffMember) : s))
-      );
+      const res = await apiFetch<{ staff: StaffMember }>(`/api/v1/staff/${staffModalData.staff.id}`, {
+        method: 'PUT',
+        body: data,
+      });
+      setStaffList((prev) => prev.map((s) => (s.id === res.staff.id ? res.staff : s)));
+      if (res.staff.id === user?.id) await refreshUser();
       soundEffects.playSuccess();
     } else {
-      const newStaff: StaffMember = {
-        id: `stf-${Date.now()}`,
-        name: data.name || 'New Staff',
-        email: data.email || 'staff@coffeepos.com',
-        role: data.role || 'CASHIER',
-        phone: data.phone || '+855 12 000 000',
-        status: data.status || 'Active',
-        shift: data.shift || 'Morning',
-        salesCount: 0,
-      };
-      setStaffList((prev) => [newStaff, ...prev]);
+      const res = await apiFetch<{ staff: StaffMember }>('/api/v1/staff', {
+        method: 'POST',
+        body: data,
+      });
+      setStaffList((prev) => [...prev, res.staff]);
       soundEffects.playSuccess();
     }
-    setStaffModalData({ isOpen: false, staff: null });
   };
 
   // Handle Delete Staff
-  const handleDeleteStaff = (staff: StaffMember) => {
-    if (confirm(`តើអ្នកប្រាកដជាចង់លុបបុគ្គលិក "${staff.name}" (${staff.role}) ចេញពីប្រព័ន្ធមែនទេ?\nAre you sure you want to delete staff member "${staff.name}"?`)) {
+  const handleDeleteStaff = async (staff: StaffMember) => {
+    if (!canManageStaff || staff.id === user?.id) return;
+    if (
+      !confirm(
+        `តើអ្នកប្រាកដជាចង់លុបបុគ្គលិក "${staff.name}" (${staff.role}) ចេញពីប្រព័ន្ធមែនទេ?\nAre you sure you want to delete staff member "${staff.name}"?`
+      )
+    ) {
+      return;
+    }
+
+    setError(null);
+    try {
+      await apiFetch(`/api/v1/staff/${staff.id}`, { method: 'DELETE' });
       setStaffList((prev) => prev.filter((s) => s.id !== staff.id));
       soundEffects.playBeep();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to delete staff member');
     }
   };
 
   // Toggle Attendance
-  const handleToggleAttendance = (id: string) => {
-    soundEffects.playBeep();
-    setStaffList((prev) =>
-      prev.map((s) => {
-        if (s.id === id) {
-          const nextStatus = s.status === 'Active' ? 'On Leave' : 'Active';
-          return { ...s, status: nextStatus };
-        }
-        return s;
-      })
-    );
+  const handleToggleAttendance = async (staff: StaffMember) => {
+    if (!canManageStaff) return;
+    const nextStatus = staff.status === 'Active' ? 'On Leave' : 'Active';
+    setError(null);
+    try {
+      const res = await apiFetch<{ staff: StaffMember }>(`/api/v1/staff/${staff.id}`, {
+        method: 'PUT',
+        body: { status: nextStatus },
+      });
+      setStaffList((prev) => prev.map((s) => (s.id === res.staff.id ? res.staff : s)));
+      soundEffects.playBeep();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to update shift status');
+    }
   };
 
   const roleStyles = {
@@ -150,14 +175,23 @@ export const EmployeesPage: React.FC = () => {
             <div className="flex items-center space-x-2">
               <h2 className="text-xl font-black text-stone-100 tracking-tight">Staff HR & Role Matrix</h2>
               <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/80 border border-amber-800/60 px-2.5 py-0.5 rounded-full">
-                {staffList.length} Active Accounts
+                {staffList.length} Accounts
               </span>
             </div>
-            <p className="text-xs text-stone-400">Manage employee accounts, shifts, RBAC roles, security & permission overrides</p>
+            <p className="text-xs text-stone-400">SQLite employee accounts, shifts, RBAC policies & permission overrides</p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => void loadStaff()}
+            disabled={loading}
+            className="px-3.5 py-2.5 rounded-2xl bg-stone-950/80 border border-stone-700 hover:bg-stone-800 text-stone-300 font-bold text-xs flex items-center space-x-1.5 transition-all"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh</span>
+          </button>
+
           <button
             onClick={() => setShowRoleModal(true)}
             className="px-4 py-2.5 rounded-2xl bg-stone-950/80 border border-amber-600/40 hover:bg-stone-800 text-amber-300 font-bold text-xs flex items-center space-x-2 transition-all shadow-md"
@@ -166,15 +200,23 @@ export const EmployeesPage: React.FC = () => {
             <span>Manage Roles Matrix</span>
           </button>
 
-          <button
-            onClick={() => setStaffModalData({ isOpen: true, staff: null })}
-            className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-extrabold text-xs flex items-center space-x-2 shadow-lg shadow-amber-900/40 transition-all hover:scale-[1.02]"
-          >
-            <Plus className="w-4 h-4 stroke-[3]" />
-            <span>+ Add Staff Member (បន្ថែមបុគ្គលិក)</span>
-          </button>
+          {canManageStaff && (
+            <button
+              onClick={() => setStaffModalData({ isOpen: true, staff: null })}
+              className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-stone-950 font-extrabold text-xs flex items-center space-x-2 shadow-lg shadow-amber-900/40 transition-all hover:scale-[1.02]"
+            >
+              <Plus className="w-4 h-4 stroke-[3]" />
+              <span>Add Staff Member (បន្ថែមបុគ្គលិក)</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {error && (
+        <div className="p-3 rounded-2xl bg-red-950/50 border border-red-700/50 text-red-300 text-xs font-semibold">
+          {error}
+        </div>
+      )}
 
       {/* KPI Overview Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -479,45 +521,49 @@ export const EmployeesPage: React.FC = () => {
                               </button>
 
                               {/* Action 3: Clock In / Clock Out */}
-                              <button
-                                onClick={() => {
-                                  setOpenDropdownId(null);
-                                  handleToggleAttendance(s.id);
-                                }}
-                                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-xs text-stone-200 hover:bg-stone-800/80 transition-colors group"
-                              >
-                                <Clock
-                                  className={`w-4 h-4 shrink-0 ${
-                                    s.status === 'Active' ? 'text-amber-400' : 'text-emerald-400'
-                                  }`}
-                                />
-                                <div>
-                                  <span className="font-bold block">
-                                    {s.status === 'Active' ? 'Clock Out (ចេញវេន)' : 'Clock In (ចូលវេន)'}
-                                  </span>
-                                  <span className="text-[10px] text-stone-400 block">
-                                    {s.status === 'Active' ? 'Set as On Leave / Off duty' : 'Mark as active on register'}
-                                  </span>
-                                </div>
-                              </button>
+                              {canManageStaff && (
+                                <button
+                                  onClick={() => {
+                                    setOpenDropdownId(null);
+                                    void handleToggleAttendance(s);
+                                  }}
+                                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-xs text-stone-200 hover:bg-stone-800/80 transition-colors group"
+                                >
+                                  <Clock
+                                    className={`w-4 h-4 shrink-0 ${
+                                      s.status === 'Active' ? 'text-amber-400' : 'text-emerald-400'
+                                    }`}
+                                  />
+                                  <div>
+                                    <span className="font-bold block">
+                                      {s.status === 'Active' ? 'Clock Out (ចេញវេន)' : 'Clock In (ចូលវេន)'}
+                                    </span>
+                                    <span className="text-[10px] text-stone-400 block">
+                                      {s.status === 'Active' ? 'Set as On Leave / Off duty' : 'Mark as active on register'}
+                                    </span>
+                                  </div>
+                                </button>
+                              )}
 
                               {/* Divider */}
                               <div className="my-1 border-t border-stone-800/80"></div>
 
                               {/* Action 4: Delete Staff */}
-                              <button
-                                onClick={() => {
-                                  setOpenDropdownId(null);
-                                  handleDeleteStaff(s);
-                                }}
-                                className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors group"
-                              >
-                                <Trash2 className="w-4 h-4 text-red-400 group-hover:scale-110 transition-transform shrink-0" />
-                                <div>
-                                  <span className="font-bold block">Delete Staff (លុបបុគ្គលិក)</span>
-                                  <span className="text-[10px] text-red-400/70 block">Remove account permanently</span>
-                                </div>
-                              </button>
+                              {canManageStaff && s.id !== user?.id && !(s.role === 'ADMIN' && user?.role !== 'ADMIN') && (
+                                <button
+                                  onClick={() => {
+                                    setOpenDropdownId(null);
+                                    void handleDeleteStaff(s);
+                                  }}
+                                  className="w-full flex items-center space-x-2.5 px-3 py-2 rounded-xl text-left text-xs text-red-400 hover:bg-red-950/50 hover:text-red-300 transition-colors group"
+                                >
+                                  <Trash2 className="w-4 h-4 text-red-400 group-hover:scale-110 transition-transform shrink-0" />
+                                  <div>
+                                    <span className="font-bold block">Delete Staff (លុបបុគ្គលិក)</span>
+                                    <span className="text-[10px] text-red-400/70 block">Remove account permanently</span>
+                                  </div>
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -532,11 +578,23 @@ export const EmployeesPage: React.FC = () => {
       </div>
 
       {/* Role Management Modal */}
-      {showRoleModal && <RoleManagementModal onClose={() => setShowRoleModal(false)} />}
+      {showRoleModal && (
+        <RoleManagementModal
+          onClose={() => setShowRoleModal(false)}
+          onUpdated={() => void loadStaff()}
+        />
+      )}
 
       {/* Individual User Permission Modal */}
       {editingUserPerms && (
-        <UserPermissionModal staff={editingUserPerms} onClose={() => setEditingUserPerms(null)} />
+        <UserPermissionModal
+          staff={editingUserPerms}
+          onClose={() => setEditingUserPerms(null)}
+          onSaved={(updated) => {
+            setStaffList((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+            setEditingUserPerms(updated);
+          }}
+        />
       )}
 
       {/* Staff Form Modal (Create & Update) */}
