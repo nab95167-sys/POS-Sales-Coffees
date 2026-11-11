@@ -1,34 +1,93 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  BarChart3, Calendar, DollarSign, FileSpreadsheet,
-  TrendingUp, CreditCard, ShoppingBag, Printer, RefreshCw
+  BarChart3,
+  Calendar,
+  CreditCard,
+  DollarSign,
+  Download,
+  FileSpreadsheet,
+  Layers,
+  Printer,
+  QrCode,
+  RefreshCw,
+  ShoppingBag,
+  TrendingUp,
 } from 'lucide-react';
 import {
-  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, CartesianGrid, Legend
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts';
+import { Order } from '../types';
 import { fetchOrders } from '../services/orderService';
 import { useProducts } from '../context/ProductContext';
 import { useAuth } from '../context/AuthContext';
-import { Order } from '../types';
+import { useLanguage } from '../context/LanguageContext';
+import { showToastNotification } from '../services/telegramBotService';
+import { PageHeader } from '../components/ui/PageHeader';
+import { StatCard } from '../components/ui/StatCard';
+
+type DateRangeOption = 'Today' | 'Weekly' | 'Monthly' | 'Yearly';
+type ReportTab = 'Overview' | 'Products' | 'Payments' | 'Ledger';
+
+const PAYMENT_COLORS = ['#f59e0b', '#10b981', '#38bdf8', '#a855f7', '#fb7185', '#14b8a6'];
+
+function escapeCsvCell(value: unknown): string {
+  const raw = String(value ?? '');
+  const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+function formatPaymentLabel(method?: string): string {
+  switch (method) {
+    case 'ABA_KHQR':
+      return 'ABA KHQR';
+    case 'CREDIT_CARD':
+      return 'Card Terminal';
+    case 'BAKONG':
+      return 'Bakong';
+    case 'ACLEDA':
+      return 'ACLEDA';
+    case 'WING':
+      return 'Wing';
+    case 'MIXED':
+      return 'Split Payment';
+    case 'CASH':
+    default:
+      return 'Cash USD/KHR';
+  }
+}
 
 export const ReportsPage: React.FC = () => {
   const { products } = useProducts();
   const { hasGranularPermission } = useAuth();
+  const { t } = useLanguage();
   const canExport = hasGranularPermission('reports:export');
 
-  const [dateRange, setDateRange] = useState<'Today' | 'Weekly' | 'Monthly' | 'Yearly'>('Weekly');
-  const [activeTab, setActiveTab] = useState<'Overview' | 'Products' | 'Payments' | 'Ledger'>('Overview');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dateRange, setDateRange] = useState<DateRangeOption>('Weekly');
+  const [activeTab, setActiveTab] = useState<ReportTab>('Overview');
 
-  const loadReports = useCallback(async () => {
-    setLoading(true);
+  const loadReports = useCallback(async (isManual = false) => {
+    if (isManual) setRefreshing(true);
     try {
-      const list = await fetchOrders({ limit: 500 });
-      setOrders(list);
+      const data = await fetchOrders({ limit: 500 });
+      setOrders(data);
+    } catch {
+      showToastNotification('Failed to fetch order ledger for reports.', 'error');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -36,538 +95,737 @@ export const ReportsPage: React.FC = () => {
     void loadReports();
   }, [loadReports]);
 
+  const productCostMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of products) {
+      map.set(p.id, p.costPrice);
+    }
+    return map;
+  }, [products]);
+
   const filteredOrders = useMemo(() => {
     const now = new Date();
-    const todayIso = now.toISOString().slice(0, 10);
-    const daysLimit = dateRange === 'Today' ? 0 : dateRange === 'Weekly' ? 7 : dateRange === 'Monthly' ? 30 : 365;
-    const cutoff = new Date(now);
-    cutoff.setDate(cutoff.getDate() - daysLimit);
-    const cutoffMs = cutoff.getTime();
+    let cutoff: number;
+
+    if (dateRange === 'Today') {
+      cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    } else if (dateRange === 'Weekly') {
+      cutoff = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    } else if (dateRange === 'Monthly') {
+      cutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
+    } else {
+      cutoff = now.getTime() - 365 * 24 * 60 * 60 * 1000;
+    }
 
     return orders.filter((o) => {
-      if (dateRange === 'Today') return o.createdAt.startsWith(todayIso);
-      return new Date(o.createdAt).getTime() >= cutoffMs;
+      const ts = new Date(o.createdAt).getTime();
+      return Number.isFinite(ts) && ts >= cutoff;
     });
   }, [orders, dateRange]);
 
-  const validOrders = useMemo(() => filteredOrders.filter((o) => !o.isRefunded), [filteredOrders]);
-
-  const productCostMap = useMemo(
-    () => new Map(products.map((p) => [p.id, { costPrice: p.costPrice, category: p.categoryName || 'Menu' }])),
-    [products]
-  );
-
   const kpis = useMemo(() => {
+    const valid = filteredOrders.filter((o) => o.status !== 'CANCELLED' && !o.isRefunded);
+    const refunded = filteredOrders.filter((o) => o.isRefunded || o.status === 'CANCELLED');
+
     let grossRevenue = 0;
-    let totalCogs = 0;
     let totalTax = 0;
-    let khqrSales = 0;
-    let cashSales = 0;
-    let cardSales = 0;
-    let otherWalletSales = 0;
-    let totalItems = 0;
+    let totalDiscounts = 0;
+    let totalCogs = 0;
+    let digitalTotal = 0;
 
-    for (const o of validOrders) {
-      grossRevenue += o.totalAmount;
-      totalTax += o.taxAmount || 0;
+    for (const order of valid) {
+      grossRevenue += order.totalAmount || 0;
+      totalTax += order.taxAmount || 0;
+      totalDiscounts += order.discountAmount || 0;
 
-      for (const item of o.items) {
-        totalItems += item.quantity;
-        const meta = productCostMap.get(item.productId);
-        totalCogs += (meta ? meta.costPrice : item.unitPrice * 0.32) * item.quantity;
+      if (
+        order.paymentMethod === 'ABA_KHQR' ||
+        order.paymentMethod === 'BAKONG' ||
+        order.paymentMethod === 'ACLEDA' ||
+        order.paymentMethod === 'WING'
+      ) {
+        digitalTotal += order.totalAmount || 0;
       }
 
-      if (o.splitPayments && o.splitPayments.length > 0) {
-        for (const sp of o.splitPayments) {
-          if (sp.method === 'ABA_KHQR') khqrSales += sp.amount;
-          else if (sp.method === 'CASH') cashSales += sp.amount;
-          else if (sp.method === 'CREDIT_CARD') cardSales += sp.amount;
-          else otherWalletSales += sp.amount;
-        }
-      } else {
-        const m = o.paymentMethod || 'CASH';
-        if (m === 'ABA_KHQR') khqrSales += o.totalAmount;
-        else if (m === 'CASH') cashSales += o.totalAmount;
-        else if (m === 'CREDIT_CARD') cardSales += o.totalAmount;
-        else otherWalletSales += o.totalAmount;
+      for (const item of order.items || []) {
+        const unitCost = productCostMap.get(item.productId) ?? item.unitPrice * 0.35;
+        totalCogs += unitCost * (item.quantity || 1);
       }
     }
 
-    const netProfit = grossRevenue - totalCogs - totalTax;
-    const marginPercent = grossRevenue > 0 ? (netProfit / grossRevenue) * 100 : 0;
-    const avgTicket = validOrders.length > 0 ? grossRevenue / validOrders.length : 0;
-    const avgItems = validOrders.length > 0 ? totalItems / validOrders.length : 0;
-    const khqrPercent = grossRevenue > 0 ? (khqrSales / grossRevenue) * 100 : 0;
+    const grossProfit = Math.max(0, grossRevenue - totalTax - totalCogs);
+    const marginPct = grossRevenue > 0 ? (grossProfit / grossRevenue) * 100 : 0;
+    const avgTicket = valid.length > 0 ? grossRevenue / valid.length : 0;
+    const digitalShare = grossRevenue > 0 ? (digitalTotal / grossRevenue) * 100 : 0;
+    const refundedAmount = refunded.reduce((acc, o) => acc + (o.totalAmount || 0), 0);
 
     return {
+      orderCount: valid.length,
       grossRevenue,
-      totalCogs,
       totalTax,
-      netProfit,
-      marginPercent,
+      totalDiscounts,
+      totalCogs,
+      grossProfit,
+      marginPct,
       avgTicket,
-      avgItems,
-      khqrSales,
-      cashSales,
-      cardSales,
-      otherWalletSales,
-      khqrPercent,
+      digitalShare,
+      refundedCount: refunded.length,
+      refundedAmount,
     };
-  }, [validOrders, productCostMap]);
+  }, [filteredOrders, productCostMap]);
 
-  const salesLedgerLogs = useMemo(
-    () =>
-      filteredOrders.map((o) => ({
-        id: o.orderNumber,
-        date: new Date(o.createdAt).toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }),
-        cashier: o.cashierName,
-        items: o.items.reduce((s, it) => s + it.quantity, 0),
-        method: o.paymentMethod ? o.paymentMethod.replace('_', ' ') : 'Cash',
-        total: o.totalAmount,
-        isRefunded: Boolean(o.isRefunded),
-        status: o.isRefunded ? 'Refunded' : o.status,
-      })),
-    [filteredOrders]
-  );
-
-  // Revenue & Profit Trend Data aggregated by date
   const financialTrendData = useMemo(() => {
-    const grouped = new Map<string, { period: string; revenue: number; cost: number; profit: number; orders: number }>();
-    for (const o of [...validOrders].reverse()) {
-      const key = o.createdAt.slice(0, 10);
-      const label = new Date(o.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      let entry = grouped.get(key);
-      if (!entry) {
-        entry = { period: label, revenue: 0, cost: 0, profit: 0, orders: 0 };
-        grouped.set(key, entry);
+    const valid = filteredOrders.filter((o) => o.status !== 'CANCELLED' && !o.isRefunded);
+    const buckets = new Map<string, { label: string; sortKey: number; revenue: number; profit: number; orders: number }>();
+
+    for (const order of valid) {
+      const dt = new Date(order.createdAt);
+      let key: string;
+      let label: string;
+      let sortKey: number;
+
+      if (dateRange === 'Today') {
+        const hr = dt.getHours();
+        key = `${hr}`;
+        label = `${String(hr).padStart(2, '0')}:00`;
+        sortKey = hr;
+      } else if (dateRange === 'Yearly') {
+        const y = dt.getFullYear();
+        const m = dt.getMonth();
+        key = `${y}-${m}`;
+        label = dt.toLocaleDateString('en-US', { month: 'short' });
+        sortKey = y * 100 + m;
+      } else {
+        const y = dt.getFullYear();
+        const m = dt.getMonth();
+        const d = dt.getDate();
+        key = `${y}-${m}-${d}`;
+        label = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        sortKey = new Date(y, m, d).getTime();
       }
+
       let orderCost = 0;
-      for (const item of o.items) {
-        const meta = productCostMap.get(item.productId);
-        orderCost += (meta ? meta.costPrice : item.unitPrice * 0.32) * item.quantity;
+      for (const item of order.items || []) {
+        const unitCost = productCostMap.get(item.productId) ?? item.unitPrice * 0.35;
+        orderCost += unitCost * (item.quantity || 1);
       }
-      entry.revenue = Number((entry.revenue + o.totalAmount).toFixed(2));
-      entry.cost = Number((entry.cost + orderCost).toFixed(2));
-      entry.profit = Number((entry.revenue - entry.cost).toFixed(2));
-      entry.orders += 1;
-    }
-    return Array.from(grouped.values()).slice(-14);
-  }, [validOrders, productCostMap]);
+      const orderProfit = Math.max(0, (order.totalAmount || 0) - (order.taxAmount || 0) - orderCost);
 
-  // Top Product Sales Volume aggregated from real orders
+      const existing = buckets.get(key) || { label, sortKey, revenue: 0, profit: 0, orders: 0 };
+      existing.revenue += order.totalAmount || 0;
+      existing.profit += orderProfit;
+      existing.orders += 1;
+      buckets.set(key, existing);
+    }
+
+    return Array.from(buckets.values())
+      .sort((a, b) => a.sortKey - b.sortKey)
+      .map((row) => ({
+        ...row,
+        revenue: Number(row.revenue.toFixed(2)),
+        profit: Number(row.profit.toFixed(2)),
+      }));
+  }, [filteredOrders, dateRange, productCostMap]);
+
   const productPerformanceData = useMemo(() => {
-    const map = new Map<string, { name: string; quantity: number; revenue: number; category: string }>();
-    for (const o of validOrders) {
-      for (const item of o.items) {
-        const meta = productCostMap.get(item.productId);
-        const existing = map.get(item.productId);
-        if (existing) {
-          existing.quantity += item.quantity;
-          existing.revenue += item.itemSubtotal;
-        } else {
-          map.set(item.productId, {
-            name: item.name,
-            quantity: item.quantity,
-            revenue: item.itemSubtotal,
-            category: meta?.category || 'Beverage',
-          });
-        }
+    const valid = filteredOrders.filter((o) => o.status !== 'CANCELLED' && !o.isRefunded);
+    const map = new Map<
+      string,
+      { productId: string; name: string; qty: number; revenue: number; cogs: number }
+    >();
+
+    for (const order of valid) {
+      for (const item of order.items || []) {
+        const existing = map.get(item.productId) || {
+          productId: item.productId,
+          name: item.name,
+          qty: 0,
+          revenue: 0,
+          cogs: 0,
+        };
+        const unitCost = productCostMap.get(item.productId) ?? item.unitPrice * 0.35;
+        existing.qty += item.quantity || 1;
+        existing.revenue += item.itemSubtotal || item.unitPrice * item.quantity;
+        existing.cogs += unitCost * (item.quantity || 1);
+        map.set(item.productId, existing);
       }
     }
-    return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue).slice(0, 20);
-  }, [validOrders, productCostMap]);
 
-  // Payment Distribution Data
-  const paymentDistributionData = useMemo(
-    () => [
-      { name: 'ABA KHQR', value: Number(kpis.khqrSales.toFixed(2)), color: '#ef4444' },
-      { name: 'Cash (USD)', value: Number(kpis.cashSales.toFixed(2)), color: '#10b981' },
-      { name: 'Credit Card', value: Number(kpis.cardSales.toFixed(2)), color: '#3b82f6' },
-      { name: 'Bakong / Wing', value: Number(kpis.otherWalletSales.toFixed(2)), color: '#f59e0b' },
-    ],
-    [kpis]
-  );
+    return Array.from(map.values())
+      .map((row) => {
+        const profit = Math.max(0, row.revenue - row.cogs);
+        const marginPct = row.revenue > 0 ? (profit / row.revenue) * 100 : 0;
+        return { ...row, profit, marginPct };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [filteredOrders, productCostMap]);
 
-  // Export CSV (neutralize leading formula characters)
+  const paymentDistributionData = useMemo(() => {
+    const valid = filteredOrders.filter((o) => o.status !== 'CANCELLED' && !o.isRefunded);
+    const map = new Map<string, { method: string; label: string; value: number; count: number }>();
+
+    for (const order of valid) {
+      const m = order.paymentMethod || 'CASH';
+      const existing = map.get(m) || {
+        method: m,
+        label: formatPaymentLabel(m),
+        value: 0,
+        count: 0,
+      };
+      existing.value += order.totalAmount || 0;
+      existing.count += 1;
+      map.set(m, existing);
+    }
+
+    return Array.from(map.values())
+      .map((entry) => ({ ...entry, value: Number(entry.value.toFixed(2)) }))
+      .sort((a, b) => b.value - a.value);
+  }, [filteredOrders]);
+
+  const salesLedgerLogs = useMemo(() => {
+    return [...filteredOrders].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [filteredOrders]);
+
   const handleExportCSV = () => {
-    const escapeCell = (v: string | number) => {
-      const s = String(v);
-      const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
-      return `"${safe.replace(/"/g, '""')}"`;
-    };
-    const rows = [
-      ['Period', 'Gross Revenue ($)', 'Cost of Goods ($)', 'Net Profit ($)', 'Orders Count'],
-      ...financialTrendData.map((e) => [e.period, e.revenue, e.cost, e.profit, e.orders]),
+    if (!canExport) {
+      showToastNotification('Export permission is required.', 'warning');
+      return;
+    }
+
+    const headers = [
+      'Order Number',
+      'Date',
+      'Type',
+      'Status',
+      'Cashier',
+      'Payment Method',
+      'Subtotal',
+      'Discount',
+      'Tax',
+      'Total USD',
+      'Refunded',
     ];
-    const csvString = rows.map((r) => r.map(escapeCell).join(',')).join('\n');
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+
+    const rows = salesLedgerLogs.map((o) => [
+      escapeCsvCell(o.orderNumber),
+      escapeCsvCell(new Date(o.createdAt).toLocaleString()),
+      escapeCsvCell(o.type),
+      escapeCsvCell(o.status),
+      escapeCsvCell(o.cashierName),
+      escapeCsvCell(formatPaymentLabel(o.paymentMethod)),
+      escapeCsvCell((o.subtotal || 0).toFixed(2)),
+      escapeCsvCell((o.discountAmount || 0).toFixed(2)),
+      escapeCsvCell((o.taxAmount || 0).toFixed(2)),
+      escapeCsvCell((o.totalAmount || 0).toFixed(2)),
+      escapeCsvCell(o.isRefunded ? `YES (${o.refundReason || 'Refunded'})` : 'NO'),
+    ]);
+
+    const csv = '\uFEFF' + [headers.map(escapeCsvCell).join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `Aura_Coffee_Financial_Report_${dateRange}.csv`;
+    link.download = `aura-pos-report-${dateRange.toLowerCase()}-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
+    link.remove();
     URL.revokeObjectURL(url);
+    showToastNotification(`Exported ${salesLedgerLogs.length} orders to CSV.`, 'success');
   };
 
-  // Export PDF / Print Official Statement
   const handlePrintPDF = () => {
+    if (!canExport) {
+      showToastNotification('Export permission is required.', 'warning');
+      return;
+    }
     window.print();
   };
 
   return (
-    <div className="space-y-6 font-sans">
-      {/* Top Header Bar & Control Panel */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-stone-900/80 p-4 rounded-3xl border border-stone-800 glass-panel">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-amber-600/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-            <BarChart3 className="w-5 h-5" />
+    <div className="space-y-6 pb-20 lg:pb-8">
+      <PageHeader
+        icon={<BarChart3 className="w-6 h-6" />}
+        title={t('reports')}
+        subtitle={t('reportsSub')}
+        badge="P&L Analytics"
+        actions={
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <button
+              type="button"
+              onClick={() => void loadReports(true)}
+              disabled={refreshing}
+              className="px-3.5 py-2.5 rounded-xl bg-zinc-900/70 hover:bg-zinc-800 border border-white/10 text-zinc-200 text-xs font-semibold flex items-center gap-2 transition-all disabled:opacity-60"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-amber-400' : ''}`} />
+              <span className="hidden sm:inline">{t('refresh')}</span>
+            </button>
+
+            {canExport && (
+              <>
+                <button
+                  type="button"
+                  onClick={handlePrintPDF}
+                  className="px-3.5 py-2.5 rounded-xl bg-zinc-900/80 hover:bg-zinc-800 border border-white/10 text-zinc-200 text-xs font-bold flex items-center gap-2 transition-all"
+                >
+                  <Printer className="w-4 h-4 text-amber-400" />
+                  Print PDF
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className="px-4 py-2.5 rounded-xl gold-gradient-bg text-zinc-950 text-xs font-black flex items-center gap-2 shadow-lg shadow-amber-500/20 hover:brightness-110 transition-all"
+                >
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </button>
+              </>
+            )}
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-stone-100">Executive Financial & Sales Intelligence</h2>
-            <p className="text-xs text-stone-400">Live SQLite P&L breakdown, sales velocity & transaction audit ledger</p>
-          </div>
+        }
+      />
+
+      {/* Period Filter & Sub-Tabs */}
+      <div className="glass-card p-3 sm:p-4 rounded-2xl flex flex-col lg:flex-row gap-3 lg:items-center justify-between print:hidden">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 lg:pb-0">
+          {(['Overview', 'Products', 'Payments', 'Ledger'] as ReportTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
+                activeTab === tab
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm'
+                  : 'bg-zinc-900/60 text-zinc-400 border-white/10 hover:text-zinc-200'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
 
-        {/* Date Filter & Export Action Bar */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Date Selector */}
-          <div className="flex items-center bg-stone-950 p-1 rounded-2xl border border-stone-800">
-            <Calendar className="w-3.5 h-3.5 text-amber-400 ml-2 mr-1" />
-            {(['Today', 'Weekly', 'Monthly', 'Yearly'] as const).map((r) => (
-              <button
-                key={r}
-                onClick={() => setDateRange(r)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  dateRange === r
-                    ? 'bg-amber-600 text-stone-950 shadow-md'
-                    : 'text-stone-400 hover:text-stone-200'
-                }`}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={() => void loadReports()}
-            disabled={loading}
-            className="px-3 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-stone-300 border border-stone-700 font-bold text-xs flex items-center space-x-1.5"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
-
-          {canExport && (
-            <>
-              <button
-                onClick={handleExportCSV}
-                className="px-3.5 py-2 rounded-xl bg-stone-900 hover:bg-stone-800 text-stone-200 border border-stone-700 font-bold text-xs flex items-center space-x-1.5 transition-colors"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Excel / CSV</span>
-              </button>
-
-              <button
-                onClick={handlePrintPDF}
-                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center space-x-1.5 transition-colors shadow-lg shadow-amber-900/30"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>PDF Statement</span>
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* KPI Cards Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        {/* Gross Revenue */}
-        <div className="p-5 rounded-3xl bg-stone-900/80 border border-amber-700/30 glass-card shadow-xl space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Gross Sales Revenue</span>
-            <div className="w-9 h-9 rounded-2xl bg-amber-600/20 text-amber-400 flex items-center justify-center">
-              <DollarSign className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">${kpis.grossRevenue.toFixed(2)}</h3>
-            <span className="text-xs font-bold text-emerald-400 flex items-center">
-              <TrendingUp className="w-3.5 h-3.5 mr-1" />
-              {dateRange}
-            </span>
-          </div>
-          <p className="text-[11px] text-stone-500">{validOrders.length} total orders fulfilled</p>
-        </div>
-
-        {/* Operating Profit */}
-        <div className="p-5 rounded-3xl bg-stone-900/80 border border-stone-800 glass-card shadow-xl space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Net Operating Profit</span>
-            <div className="w-9 h-9 rounded-2xl bg-emerald-600/20 text-emerald-400 flex items-center justify-center">
-              <TrendingUp className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-emerald-400 font-mono">${kpis.netProfit.toFixed(2)}</h3>
-            <span className="text-xs font-bold text-emerald-300">{kpis.marginPercent.toFixed(1)}% Margin</span>
-          </div>
-          <p className="text-[11px] text-stone-500">Est. COGS: ${kpis.totalCogs.toFixed(2)}</p>
-        </div>
-
-        {/* Avg Order Ticket */}
-        <div className="p-5 rounded-3xl bg-stone-900/80 border border-stone-800 glass-card shadow-xl space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Average Ticket Size (AOV)</span>
-            <div className="w-9 h-9 rounded-2xl bg-blue-600/20 text-blue-400 flex items-center justify-center">
-              <ShoppingBag className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-stone-100 font-mono">${kpis.avgTicket.toFixed(2)}</h3>
-            <span className="text-xs font-bold text-blue-400">{kpis.avgItems.toFixed(1)} items/order</span>
-          </div>
-          <p className="text-[11px] text-stone-500">VAT Collected: ${kpis.totalTax.toFixed(2)}</p>
-        </div>
-
-        {/* ABA KHQR Ratio */}
-        <div className="p-5 rounded-3xl bg-stone-900/80 border border-stone-800 glass-card shadow-xl space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-stone-400">Digital KHQR Ratio</span>
-            <div className="w-9 h-9 rounded-2xl bg-red-600/20 text-red-400 flex items-center justify-center">
-              <CreditCard className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="flex items-baseline justify-between">
-            <h3 className="text-2xl font-extrabold text-red-400 font-mono">{kpis.khqrPercent.toFixed(1)}%</h3>
-            <span className="text-xs font-bold text-stone-300">${kpis.khqrSales.toFixed(2)} via KHQR</span>
-          </div>
-          <p className="text-[11px] text-stone-500">Live payment channel ratio</p>
+        <div className="flex items-center gap-1.5 overflow-x-auto">
+          <Calendar className="w-4 h-4 text-zinc-500 mr-1 flex-shrink-0" />
+          {(['Today', 'Weekly', 'Monthly', 'Yearly'] as DateRangeOption[]).map((range) => (
+            <button
+              key={range}
+              type="button"
+              onClick={() => setDateRange(range)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border ${
+                dateRange === range
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-zinc-900/60 text-zinc-400 border-white/10 hover:text-zinc-200'
+              }`}
+            >
+              {range}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Sub Navigation Tabs */}
-      <div className="flex items-center space-x-2 border-b border-stone-800/80 pb-3">
-        {(['Overview', 'Products', 'Payments', 'Ledger'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 rounded-2xl text-xs font-bold transition-all ${
-              activeTab === tab
-                ? 'bg-amber-600/20 text-amber-400 border border-amber-500/40 shadow-md'
-                : 'text-stone-400 hover:text-stone-200'
-            }`}
-          >
-            {tab === 'Overview' && 'Financial Overview'}
-            {tab === 'Products' && 'Product Sales Performance'}
-            {tab === 'Payments' && 'Payment Method Share'}
-            {tab === 'Ledger' && 'Transaction Sales Ledger'}
-          </button>
-        ))}
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <StatCard
+          label="Gross Revenue"
+          value={`$${kpis.grossRevenue.toFixed(2)}`}
+          subtext={`${kpis.orderCount} paid orders`}
+          icon={<DollarSign className="w-5 h-5" />}
+          accent="amber"
+        />
+        <StatCard
+          label="Estimated Profit"
+          value={`$${kpis.grossProfit.toFixed(2)}`}
+          subtext={`${kpis.marginPct.toFixed(1)}% net margin`}
+          icon={<TrendingUp className="w-5 h-5" />}
+          accent="emerald"
+        />
+        <StatCard
+          label="Avg Ticket"
+          value={`$${kpis.avgTicket.toFixed(2)}`}
+          subtext={`Tax: $${kpis.totalTax.toFixed(2)}`}
+          icon={<ShoppingBag className="w-5 h-5" />}
+          accent="blue"
+        />
+        <StatCard
+          label="KHQR & Digital"
+          value={`${kpis.digitalShare.toFixed(1)}%`}
+          subtext={
+            kpis.refundedCount > 0
+              ? `${kpis.refundedCount} refunded ($${kpis.refundedAmount.toFixed(2)})`
+              : `Discounts: $${kpis.totalDiscounts.toFixed(2)}`
+          }
+          icon={<QrCode className="w-5 h-5" />}
+          accent="purple"
+        />
       </div>
 
-      {/* Tab 1: Financial Overview */}
-      {activeTab === 'Overview' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Main Sales & Profit Bar Chart */}
-          <div className="lg:col-span-8 bg-stone-900/80 border border-stone-800 rounded-3xl p-6 glass-panel space-y-4">
-            <div className="flex justify-between items-center">
-              <div>
-                <h3 className="text-lg font-bold text-stone-100">Revenue vs Cost Breakdown</h3>
-                <p className="text-xs text-stone-400">{dateRange} financial performance comparative view</p>
-              </div>
-              <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/40 px-3 py-1 rounded-full border border-emerald-900/40">
-                Profit Margin: {kpis.marginPercent.toFixed(1)}%
-              </span>
-            </div>
-
-            <div className="h-80 w-full pt-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={financialTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#292524" />
-                  <XAxis dataKey="period" stroke="#78716c" fontSize={11} />
-                  <YAxis stroke="#78716c" fontSize={11} />
-                  <Tooltip contentStyle={{ backgroundColor: '#1c1917', borderColor: '#78716c', borderRadius: '12px', color: '#f5f5f4' }} />
-                  <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '12px' }} />
-                  <Bar dataKey="revenue" fill="#C68E17" radius={[6, 6, 0, 0]} name="Gross Revenue ($)" />
-                  <Bar dataKey="cost" fill="#ef4444" radius={[6, 6, 0, 0]} name="Cost of Goods ($)" />
-                  <Bar dataKey="profit" fill="#10b981" radius={[6, 6, 0, 0]} name="Net Profit ($)" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Side Summary Breakdown */}
-          <div className="lg:col-span-4 bg-stone-900/80 border border-stone-800 rounded-3xl p-6 glass-panel space-y-4 flex flex-col justify-between">
-            <div>
-              <h3 className="text-lg font-bold text-stone-100">Profitability Analysis</h3>
-              <p className="text-xs text-stone-400">SQLite period KPI summary</p>
-            </div>
-
-            <div className="space-y-3 font-mono text-xs">
-              <div className="p-3 bg-stone-950 rounded-2xl border border-stone-800 flex justify-between">
-                <span className="text-stone-400">Total Sales</span>
-                <span className="font-bold text-stone-100">${kpis.grossRevenue.toFixed(2)}</span>
-              </div>
-              <div className="p-3 bg-stone-950 rounded-2xl border border-stone-800 flex justify-between text-red-400">
-                <span>COGS Expense</span>
-                <span className="font-bold">-${kpis.totalCogs.toFixed(2)}</span>
-              </div>
-              <div className="p-3 bg-stone-950 rounded-2xl border border-stone-800 flex justify-between text-emerald-400 font-bold text-sm">
-                <span>Gross Operating Profit</span>
-                <span>${kpis.netProfit.toFixed(2)}</span>
-              </div>
-              <div className="p-3 bg-stone-950 rounded-2xl border border-stone-800 flex justify-between text-amber-400">
-                <span>VAT Tax Collected</span>
-                <span>${kpis.totalTax.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="p-4 bg-amber-950/30 border border-amber-700/40 rounded-2xl text-xs text-amber-300">
-              <span className="font-bold">Top Channel:</span> {kpis.khqrPercent >= 50 ? 'ABA KHQR leads digital volume.' : 'Cash & Digital channels balanced.'}
-            </div>
-          </div>
+      {loading ? (
+        <div className="glass-card rounded-2xl p-12 text-center text-zinc-400 text-sm">
+          Calculating financial intelligence...
         </div>
-      )}
-
-      {/* Tab 2: Product Performance */}
-      {activeTab === 'Products' && (
-        <div className="bg-stone-900/80 border border-stone-800 rounded-3xl p-6 glass-panel space-y-4">
-          <h3 className="text-lg font-bold text-stone-100">Top Performing Menu Products</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-stone-950/80 text-stone-400 uppercase font-semibold border-b border-stone-800">
-                <tr>
-                  <th className="p-4">Rank & Item Name</th>
-                  <th className="p-4">Category</th>
-                  <th className="p-4">Units Sold</th>
-                  <th className="p-4">Total Revenue Generated</th>
-                  <th className="p-4">Share %</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-800/80">
-                {productPerformanceData.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center text-stone-500">
-                      No product sales recorded for {dateRange}.
-                    </td>
-                  </tr>
-                ) : (
-                  productPerformanceData.map((prod, idx) => (
-                    <tr key={prod.name} className="hover:bg-stone-800/30">
-                      <td className="p-4 font-bold text-stone-100 text-sm flex items-center space-x-2">
-                        <span className="w-6 h-6 rounded-full bg-amber-600/20 text-amber-400 font-mono text-xs flex items-center justify-center">
-                          #{idx + 1}
-                        </span>
-                        <span>{prod.name}</span>
-                      </td>
-                      <td className="p-4 text-amber-300 font-medium">{prod.category}</td>
-                      <td className="p-4 font-mono font-bold text-stone-200">{prod.quantity} Cups</td>
-                      <td className="p-4 font-mono font-bold text-emerald-400">${prod.revenue.toFixed(2)}</td>
-                      <td className="p-4 font-mono text-stone-400 font-semibold">
-                        {kpis.grossRevenue > 0 ? ((prod.revenue / kpis.grossRevenue) * 100).toFixed(1) : '0.0'}%
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 3: Payment Method Share */}
-      {activeTab === 'Payments' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-6 bg-stone-900/80 border border-stone-800 rounded-3xl p-6 glass-panel space-y-4">
-            <h3 className="text-lg font-bold text-stone-100">Payment Channel Breakdown</h3>
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={paymentDistributionData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} label>
-                    {paymentDistributionData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip contentStyle={{ backgroundColor: '#1c1917', borderColor: '#78716c', borderRadius: '12px', color: '#f5f5f4' }} />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="lg:col-span-6 bg-stone-900/80 border border-stone-800 rounded-3xl p-6 glass-panel space-y-4 flex flex-col justify-center">
-            <div className="space-y-3">
-              {paymentDistributionData.map((pay) => (
-                <div key={pay.name} className="p-4 rounded-2xl bg-stone-950 border border-stone-800 flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-4 h-4 rounded-full" style={{ backgroundColor: pay.color }}></div>
-                    <span className="font-bold text-stone-200 text-sm">{pay.name}</span>
+      ) : (
+        <>
+          {/* Overview Tab */}
+          {activeTab === 'Overview' && (
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+              <div className="xl:col-span-8 glass-card p-5 rounded-2xl space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-base font-bold text-white">Revenue vs Gross Profit</h3>
+                    <p className="text-xs text-zinc-400">
+                      Period breakdown for <span className="text-amber-300 font-semibold">{dateRange}</span>
+                    </p>
                   </div>
-                  <div className="text-right font-mono">
-                    <span className="text-amber-400 font-bold text-sm block">${pay.value.toFixed(2)}</span>
-                    <span className="text-[10px] text-stone-400">
-                      {kpis.grossRevenue > 0 ? ((pay.value / kpis.grossRevenue) * 100).toFixed(1) : '0.0'}% of total
+                  <div className="flex items-center gap-4 text-xs">
+                    <span className="flex items-center gap-1.5 text-zinc-300">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Revenue
+                    </span>
+                    <span className="flex items-center gap-1.5 text-zinc-300">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" /> Profit
                     </span>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* Tab 4: Detailed Sales Ledger */}
-      {activeTab === 'Ledger' && (
-        <div className="bg-stone-900/80 border border-stone-800 rounded-3xl p-6 glass-panel space-y-4">
-          <h3 className="text-lg font-bold text-stone-100">Live Sales Transaction Audit Ledger</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-stone-950/80 text-stone-400 uppercase font-semibold border-b border-stone-800">
-                <tr>
-                  <th className="p-4">Order ID</th>
-                  <th className="p-4">Date & Time</th>
-                  <th className="p-4">Cashier</th>
-                  <th className="p-4">Items Count</th>
-                  <th className="p-4">Payment Method</th>
-                  <th className="p-4">Total Amount</th>
-                  <th className="p-4">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-800/80">
-                {salesLedgerLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-stone-500">
-                      No transactions recorded for {dateRange}.
-                    </td>
-                  </tr>
+                {financialTrendData.length === 0 ? (
+                  <div className="h-72 flex items-center justify-center text-zinc-500 text-sm">
+                    No completed orders in this timeframe.
+                  </div>
                 ) : (
-                  salesLedgerLogs.map((log) => (
-                    <tr key={log.id} className="hover:bg-stone-800/30">
-                      <td className="p-4 font-mono font-bold text-amber-400">{log.id}</td>
-                      <td className="p-4 text-stone-300 font-mono">{log.date}</td>
-                      <td className="p-4 font-medium text-stone-200">{log.cashier}</td>
-                      <td className="p-4 font-mono text-stone-300">{log.items} Items</td>
-                      <td className="p-4 font-semibold text-stone-300">{log.method}</td>
-                      <td className="p-4 font-mono font-extrabold text-emerald-400">${log.total.toFixed(2)}</td>
-                      <td className="p-4">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                            log.isRefunded
-                              ? 'bg-red-500/20 text-red-400 border-red-500/40'
-                              : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
-                          }`}
-                        >
-                          {log.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                  <div className="h-72 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={financialTrendData} margin={{ top: 10, right: 10, left: -12, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="reportRevGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#fbbf24" stopOpacity={0.95} />
+                            <stop offset="100%" stopColor="#d97706" stopOpacity={0.4} />
+                          </linearGradient>
+                          <linearGradient id="reportProfitGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#34d399" stopOpacity={0.9} />
+                            <stop offset="100%" stopColor="#059669" stopOpacity={0.35} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+                        <XAxis dataKey="label" stroke="#71717a" fontSize={11} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#71717a" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                        <Tooltip
+                          cursor={{ fill: 'rgba(255,255,255,0.04)' }}
+                          contentStyle={{
+                            backgroundColor: '#12131a',
+                            borderColor: 'rgba(255,255,255,0.12)',
+                            borderRadius: '14px',
+                            fontSize: '12px',
+                            color: '#fff',
+                          }}
+                        />
+                        <Bar dataKey="revenue" name="Revenue ($)" fill="url(#reportRevGrad)" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                        <Bar dataKey="profit" name="Est. Profit ($)" fill="url(#reportProfitGrad)" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              </div>
+
+              <div className="xl:col-span-4 glass-card p-5 rounded-2xl space-y-4">
+                <div>
+                  <h3 className="text-base font-bold text-white">P&L Summary</h3>
+                  <p className="text-xs text-zinc-400">Unit economics snapshot</p>
+                </div>
+
+                <div className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between py-2 border-b border-white/[0.06]">
+                    <span className="text-zinc-400">Collected Revenue</span>
+                    <span className="font-bold text-white tabular-nums">${kpis.grossRevenue.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2 border-b border-white/[0.06]">
+                    <span className="text-zinc-400">Discounts Granted</span>
+                    <span className="font-semibold text-amber-300 tabular-nums">-${kpis.totalDiscounts.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2 border-b border-white/[0.06]">
+                    <span className="text-zinc-400">VAT / Sales Tax</span>
+                    <span className="font-semibold text-zinc-300 tabular-nums">-${kpis.totalTax.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between py-2 border-b border-white/[0.06]">
+                    <span className="text-zinc-400">Estimated COGS</span>
+                    <span className="font-semibold text-rose-300 tabular-nums">-${kpis.totalCogs.toFixed(2)}</span>
+                  </div>
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="font-bold text-emerald-300">Net Est. Profit</span>
+                    <span className="text-lg font-black text-emerald-400 tabular-nums">
+                      ${kpis.grossProfit.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Products Performance Tab */}
+          {activeTab === 'Products' && (
+            <div className="space-y-4">
+              {productPerformanceData.length === 0 ? (
+                <div className="glass-card rounded-2xl p-12 text-center text-zinc-500 text-sm">
+                  No product sales recorded in this period.
+                </div>
+              ) : (
+                <>
+                  {/* Mobile Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:hidden">
+                    {productPerformanceData.map((row, idx) => (
+                      <div key={row.productId} className="glass-card p-4 rounded-2xl space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="w-7 h-7 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-black text-xs flex items-center justify-center flex-shrink-0">
+                              #{idx + 1}
+                            </span>
+                            <h4 className="font-bold text-sm text-white truncate">{row.name}</h4>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold tabular-nums">
+                            {row.marginPct.toFixed(0)}% margin
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/10 text-xs">
+                          <div>
+                            <span className="text-zinc-500 block">Sold</span>
+                            <span className="font-bold text-white tabular-nums">{row.qty}</span>
+                          </div>
+                          <div>
+                            <span className="text-zinc-500 block">Revenue</span>
+                            <span className="font-bold text-amber-300 tabular-nums">${row.revenue.toFixed(2)}</span>
+                          </div>
+                          <div>
+                            <span className="text-zinc-500 block">Profit</span>
+                            <span className="font-bold text-emerald-400 tabular-nums">${row.profit.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Table */}
+                  <div className="hidden lg:block glass-card rounded-2xl overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-zinc-400 font-bold">
+                          <th className="py-3.5 px-5">Rank</th>
+                          <th className="py-3.5 px-4">Product Name</th>
+                          <th className="py-3.5 px-4 text-right">Units Sold</th>
+                          <th className="py-3.5 px-4 text-right">Revenue</th>
+                          <th className="py-3.5 px-4 text-right">Est. COGS</th>
+                          <th className="py-3.5 px-4 text-right">Est. Profit</th>
+                          <th className="py-3.5 px-5 text-right">Margin</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.06] text-sm">
+                        {productPerformanceData.map((row, idx) => (
+                          <tr key={row.productId} className="hover:bg-white/[0.03] transition-colors">
+                            <td className="py-3.5 px-5 font-black text-amber-400 tabular-nums">#{idx + 1}</td>
+                            <td className="py-3.5 px-4 font-bold text-white">{row.name}</td>
+                            <td className="py-3.5 px-4 text-right text-zinc-200 font-semibold tabular-nums">{row.qty}</td>
+                            <td className="py-3.5 px-4 text-right font-bold text-amber-300 tabular-nums">
+                              ${row.revenue.toFixed(2)}
+                            </td>
+                            <td className="py-3.5 px-4 text-right text-zinc-400 tabular-nums">
+                              ${row.cogs.toFixed(2)}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-bold text-emerald-400 tabular-nums">
+                              ${row.profit.toFixed(2)}
+                            </td>
+                            <td className="py-3.5 px-5 text-right">
+                              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold tabular-nums">
+                                {row.marginPct.toFixed(1)}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Payments Share Tab */}
+          {activeTab === 'Payments' && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              <div className="lg:col-span-6 glass-card p-5 rounded-2xl">
+                <div className="flex items-center gap-2 mb-4">
+                  <CreditCard className="w-5 h-5 text-amber-400" />
+                  <h3 className="text-base font-bold text-white">Payment Tender Distribution</h3>
+                </div>
+                {paymentDistributionData.length === 0 ? (
+                  <div className="h-72 flex items-center justify-center text-zinc-500 text-sm">
+                    No payment data in selected timeframe.
+                  </div>
+                ) : (
+                  <div className="h-72 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={paymentDistributionData}
+                          dataKey="value"
+                          nameKey="label"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={62}
+                          outerRadius={95}
+                          paddingAngle={3}
+                        >
+                          {paymentDistributionData.map((entry, idx) => (
+                            <Cell key={entry.method} fill={PAYMENT_COLORS[idx % PAYMENT_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(val: number) => [`$${Number(val).toFixed(2)}`, 'Collected']}
+                          contentStyle={{
+                            backgroundColor: '#12131a',
+                            borderColor: 'rgba(255,255,255,0.12)',
+                            borderRadius: '12px',
+                            color: '#fff',
+                            fontSize: '12px',
+                          }}
+                        />
+                        <Legend wrapperStyle={{ fontSize: '12px' }} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+
+              <div className="lg:col-span-6 glass-card p-5 rounded-2xl space-y-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Layers className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-base font-bold text-white">Channel Breakdown</h3>
+                </div>
+                {paymentDistributionData.map((item, idx) => {
+                  const pct = kpis.grossRevenue > 0 ? (item.value / kpis.grossRevenue) * 100 : 0;
+                  return (
+                    <div key={item.method} className="p-3.5 rounded-xl bg-zinc-900/60 border border-white/10 space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-bold text-white flex items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full"
+                            style={{ backgroundColor: PAYMENT_COLORS[idx % PAYMENT_COLORS.length] }}
+                          />
+                          {item.label}
+                        </span>
+                        <span className="font-black text-amber-300 tabular-nums">${item.value.toFixed(2)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${Math.min(100, pct)}%`,
+                            backgroundColor: PAYMENT_COLORS[idx % PAYMENT_COLORS.length],
+                          }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-xs text-zinc-400">
+                        <span>{item.count} transactions</span>
+                        <span className="tabular-nums">{pct.toFixed(1)}% share</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Sales Ledger Tab */}
+          {activeTab === 'Ledger' && (
+            <div className="space-y-4">
+              {salesLedgerLogs.length === 0 ? (
+                <div className="glass-card rounded-2xl p-12 text-center space-y-2">
+                  <FileSpreadsheet className="w-10 h-10 text-zinc-600 mx-auto" />
+                  <p className="text-zinc-300 font-semibold">No ledger transactions found</p>
+                </div>
+              ) : (
+                <>
+                  {/* Mobile Ledger Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 lg:hidden">
+                    {salesLedgerLogs.map((order) => (
+                      <div key={order.id} className="glass-card p-4 rounded-2xl space-y-2.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <span className="font-mono font-bold text-sm text-amber-300">
+                              {order.orderNumber}
+                            </span>
+                            <p className="text-[11px] text-zinc-500">
+                              {new Date(order.createdAt).toLocaleString()}
+                            </p>
+                          </div>
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                              order.isRefunded || order.status === 'CANCELLED'
+                                ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            }`}
+                          >
+                            {order.isRefunded ? 'REFUNDED' : order.status}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-xs text-zinc-400 pt-2 border-t border-white/10">
+                          <span>{formatPaymentLabel(order.paymentMethod)}</span>
+                          <span className="text-base font-black text-white tabular-nums">
+                            ${(order.totalAmount || 0).toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop Ledger Table */}
+                  <div className="hidden lg:block glass-card rounded-2xl overflow-hidden">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-white/10 text-[11px] uppercase tracking-wider text-zinc-400 font-bold">
+                          <th className="py-3.5 px-5">Ticket #</th>
+                          <th className="py-3.5 px-4">Timestamp</th>
+                          <th className="py-3.5 px-4">Cashier</th>
+                          <th className="py-3.5 px-4">Method</th>
+                          <th className="py-3.5 px-4">Status</th>
+                          <th className="py-3.5 px-5 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/[0.06] text-sm">
+                        {salesLedgerLogs.map((order) => (
+                          <tr key={order.id} className="hover:bg-white/[0.03] transition-colors">
+                            <td className="py-3.5 px-5 font-mono font-bold text-amber-300">
+                              {order.orderNumber}
+                            </td>
+                            <td className="py-3.5 px-4 text-xs text-zinc-400">
+                              {new Date(order.createdAt).toLocaleString()}
+                            </td>
+                            <td className="py-3.5 px-4 text-zinc-200">{order.cashierName}</td>
+                            <td className="py-3.5 px-4 text-xs text-zinc-300">
+                              {formatPaymentLabel(order.paymentMethod)}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <span
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                                  order.isRefunded || order.status === 'CANCELLED'
+                                    ? 'bg-red-500/15 text-red-300 border-red-500/30'
+                                    : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                }`}
+                              >
+                                {order.isRefunded ? 'REFUNDED' : order.status}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-5 text-right font-black text-white tabular-nums">
+                              ${(order.totalAmount || 0).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

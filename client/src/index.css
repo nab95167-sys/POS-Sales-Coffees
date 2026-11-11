@@ -3,60 +3,78 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    color-scheme: dark;
+  }
+
   body {
-    @apply bg-[#09090b] text-zinc-100 font-sans overflow-x-hidden antialiased;
+    @apply bg-[#08090c] text-zinc-100 font-sans overflow-x-hidden antialiased selection:bg-amber-500 selection:text-zinc-950;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -15%, rgba(245, 158, 11, 0.08), transparent 65%),
+      radial-gradient(circle at 85% 90%, rgba(217, 119, 6, 0.05), transparent 45%);
+    background-attachment: fixed;
   }
 }
 
 @layer utilities {
-  /* Luxury Obsidian Glassmorphism Utilities */
+  /* Unified Obsidian & Gold Design Surfaces */
   .glass-panel {
-    background: rgba(13, 13, 16, 0.88);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    background: rgba(14, 15, 20, 0.88);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .glass-card {
-    background: rgba(20, 20, 26, 0.82);
-    backdrop-filter: blur(14px);
-    -webkit-backdrop-filter: blur(14px);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    background: linear-gradient(180deg, rgba(22, 23, 30, 0.9) 0%, rgba(16, 17, 22, 0.92) 100%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.075);
   }
 
   .glass-card-hover {
-    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
   .glass-card-hover:hover {
-    background: rgba(26, 26, 34, 0.95);
-    border-color: rgba(245, 158, 11, 0.5);
-    box-shadow: 0 14px 34px -10px rgba(0, 0, 0, 0.85), 0 0 22px -5px rgba(245, 158, 11, 0.2);
+    border-color: rgba(245, 158, 11, 0.45);
+    box-shadow: 0 14px 32px -12px rgba(0, 0, 0, 0.85), 0 0 20px -6px rgba(245, 158, 11, 0.18);
     transform: translateY(-2px);
   }
 
   .glass-input {
-    background: rgba(18, 18, 23, 0.9);
+    background: rgba(12, 13, 18, 0.92);
     border: 1px solid rgba(255, 255, 255, 0.1);
     color: #fafafa;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   .glass-input:focus {
     border-color: #f59e0b;
-    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25), 0 0 16px rgba(245, 158, 11, 0.15);
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.16);
   }
 
-  /* Luxury Gold Glow & Gradients */
+  .obsidian-surface {
+    background: #101116;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .obsidian-surface-elevated {
+    background: #161820;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+  }
+
+  /* Gold Accents */
   .gold-glow {
-    box-shadow: 0 0 25px -4px rgba(245, 158, 11, 0.35);
+    box-shadow: 0 8px 26px -6px rgba(245, 158, 11, 0.35);
   }
 
   .gold-glow-sm {
-    box-shadow: 0 0 12px -2px rgba(245, 158, 11, 0.3);
+    box-shadow: 0 4px 14px -3px rgba(245, 158, 11, 0.28);
   }
 
   .gold-gradient-bg {
-    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #d97706 100%);
   }
 
   .gold-gradient-text {
@@ -65,35 +83,46 @@
     -webkit-text-fill-color: transparent;
   }
 
-  .obsidian-surface {
-    background: #0f0f13;
-    border: 1px solid #27272a;
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
   }
 
-  .obsidian-surface-elevated {
-    background: #17171d;
-    border: 1px solid #323238;
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(245, 158, 11, 0.35) transparent;
   }
 }
 
-/* Custom Scrollbar for POS touch grid */
+/* Custom Scrollbar for POS touch grid & lists */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(13, 13, 16, 0.6);
-  border-radius: 9999px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(245, 158, 11, 0.4);
+  background: rgba(161, 161, 170, 0.22);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.85);
+  background: rgba(245, 158, 11, 0.65);
+}
+
+/* Safe Mobile Bottom Padding Helper */
+.safe-pb {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
 }
 
 /* Print thermal receipt & cup sticker labels styling */
@@ -104,6 +133,7 @@
   }
   body {
     background: white !important;
+    background-image: none !important;
     color: black !important;
   }
   body * {

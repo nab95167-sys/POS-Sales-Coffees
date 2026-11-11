@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Search, ShoppingCart, Trash2, Plus, Minus, Tag, DollarSign, 
-  CreditCard, ArrowRightLeft, PauseCircle, PlayCircle, Coffee, Check, Barcode, 
-  Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu, CheckCircle2,
-  ShieldCheck, KeyRound, ShieldAlert, FileText, Ban, FileSpreadsheet, Wallet, Megaphone,
-  History, Layers, ChevronDown
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  Search, ShoppingCart, Trash2, Plus, Minus, Tag,
+  CreditCard, ArrowRightLeft, PauseCircle, Coffee, Barcode,
+  Sparkles, Lock, BookOpen, AlertTriangle, Package, QrCode, Gift, Cpu,
+  ShieldCheck, KeyRound, FileSpreadsheet, Wallet, Megaphone,
+  History, Layers, ChevronDown, X, LayoutGrid, Rows3, FileText
 } from 'lucide-react';
 import { Product, CartItem, Order, OrderType, PaymentMethod, DiningTable, SplitPayment, StoreSettings } from '../types';
 import { VariantToppingModal } from '../components/pos/VariantToppingModal';
@@ -42,10 +43,14 @@ import { apiFetch } from '../services/api';
 export const PosPage: React.FC = () => {
   const { user } = useAuth();
   const { t } = useLanguage();
-  const { products, categories } = useProducts(); // Real-time Global Product Sync!
+  const { products, categories } = useProducts();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [selectedCategory, setSelectedCategory] = useState<string>('cat-1');
   const [searchQuery, setSearchQuery] = useState('');
+  const [compactGrid, setCompactGrid] = useState<boolean>(false);
+  const [mobileCartOpen, setMobileCartOpen] = useState<boolean>(false);
 
   // Store authoritative tax & KHR rate
   const [taxRate, setTaxRate] = useState<number>(10);
@@ -68,15 +73,6 @@ export const PosPage: React.FC = () => {
     details: string;
     onApproved: (overrideToken?: string) => void;
   } | null>(null);
-
-  useEffect(() => {
-    apiFetch<{ settings: StoreSettings }>('/api/v1/settings')
-      .then((res) => {
-        setTaxRate(res.settings.taxRate);
-        setKhrExchangeRate(res.settings.khrExchangeRate);
-      })
-      .catch(() => {});
-  }, []);
 
   // Table & Handover & Orders State
   const [selectedTable, setSelectedTable] = useState<DiningTable | null>(null);
@@ -106,10 +102,62 @@ export const PosPage: React.FC = () => {
   const [showTerminalMenu, setShowTerminalMenu] = useState(false);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
 
-  // Filter Products
+  const terminalMenuRef = useRef<HTMLDivElement | null>(null);
+  const toolsMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    apiFetch<{ settings: StoreSettings }>('/api/v1/settings')
+      .then((res) => {
+        setTaxRate(res.settings.taxRate);
+        setKhrExchangeRate(res.settings.khrExchangeRate);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Pre-select Dining Table when navigated from FloorPlan
+  useEffect(() => {
+    const navState = location.state as { selectedTable?: DiningTable } | null;
+    if (navState?.selectedTable) {
+      setOrderType('DINE_IN');
+      setSelectedTable(navState.selectedTable);
+      showToastNotification(`Attached ${navState.selectedTable.name} to ticket`, 'info');
+      navigate('/pos', { replace: true, state: null });
+    }
+  }, [location.state, navigate]);
+
+  // Close dropdown menus cleanly on outside click or Escape
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (terminalMenuRef.current && !terminalMenuRef.current.contains(target)) {
+        setShowTerminalMenu(false);
+      }
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(target)) {
+        setShowToolsMenu(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowTerminalMenu(false);
+        setShowToolsMenu(false);
+        setMobileCartOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
+
   const filteredProducts = products.filter((p) => {
     const matchesCat = selectedCategory === 'cat-1' || p.categoryId === selectedCategory;
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || p.barcode.includes(searchQuery);
+    const q = searchQuery.toLowerCase();
+    const matchesSearch =
+      p.name.toLowerCase().includes(q) ||
+      p.sku.toLowerCase().includes(q) ||
+      p.barcode.toLowerCase().includes(q);
     return matchesCat && matchesSearch;
   });
 
@@ -136,26 +184,20 @@ export const PosPage: React.FC = () => {
     }
   };
 
-  // Global USB Barcode Scanner Hardware Listener (Keyboard wedge)
+  // Global USB Barcode Scanner Listener
   useEffect(() => {
     let barcodeBuffer = '';
     let lastKeyTime = Date.now();
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't intercept if user is intentionally typing into input or textarea
       const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        return;
-      }
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
       const currentTime = Date.now();
-      const timeDiff = currentTime - lastKeyTime;
-      lastKeyTime = currentTime;
-
-      // Reset buffer if time between keystrokes exceeds 150ms (human typing vs hardware gun)
-      if (timeDiff > 150) {
+      if (currentTime - lastKeyTime > 150) {
         barcodeBuffer = '';
       }
+      lastKeyTime = currentTime;
 
       if (e.key === 'Enter') {
         if (barcodeBuffer.trim().length >= 3) {
@@ -170,9 +212,9 @@ export const PosPage: React.FC = () => {
             handleProductClick(matched);
             soundEffects.playBeep();
             setLastScannedItem(`${matched.name} (${scannedCode})`);
-            setTimeout(() => setLastScannedItem(null), 3500);
+            setTimeout(() => setLastScannedItem(null), 3200);
           } else {
-            alert(`⚠️ Barcode / SKU "${scannedCode}" not found in current catalog.`);
+            showToastNotification(`Barcode / SKU "${scannedCode}" not found in catalog.`, 'warning');
           }
           barcodeBuffer = '';
         }
@@ -244,10 +286,17 @@ export const PosPage: React.FC = () => {
     );
   };
 
+  const subtotal = cart.reduce((sum, item) => sum + item.itemSubtotal, 0);
+  const discountAmount = subtotal * (discountPercent / 100);
+  const taxableSubtotal = Math.max(0, subtotal - discountAmount);
+  const taxAmount = taxableSubtotal * (taxRate / 100);
+  const totalAmount = taxableSubtotal + taxAmount;
+  const totalUnitCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
   const handleRequestVoidCart = () => {
     if (cart.length === 0) return;
     setManagerPinAction({
-      title: 'Void Entire Cart (បោះបង់ការកុម្ម៉ង់)',
+      title: 'Void Entire Cart',
       details: `Clear all ${cart.length} items from register (Subtotal: $${subtotal.toFixed(2)})`,
       onApproved: (overrideToken) => {
         setCart([]);
@@ -262,14 +311,14 @@ export const PosPage: React.FC = () => {
           user?.name || 'Cashier',
           overrideToken
         );
-        alert('Cart voided successfully by Manager authorization.');
+        showToastNotification('Cart voided by manager authorization.', 'success');
       },
     });
   };
 
   const handleOpenCashDrawerNoSale = () => {
     setManagerPinAction({
-      title: 'Open Cash Drawer (No Sale / បើកថតលុយ)',
+      title: 'Open Cash Drawer (No Sale)',
       details: 'Manual drawer kick for physical cash count or change exchange',
       onApproved: (overrideToken) => {
         soundEffects.playCashRegister();
@@ -280,16 +329,10 @@ export const PosPage: React.FC = () => {
           user?.name || 'Cashier',
           overrideToken
         );
-        alert('Cash drawer solenoid triggered & opened!');
+        showToastNotification('Cash drawer solenoid triggered & logged.', 'success');
       },
     });
   };
-
-  const subtotal = cart.reduce((sum, item) => sum + item.itemSubtotal, 0);
-  const discountAmount = subtotal * (discountPercent / 100);
-  const taxableSubtotal = Math.max(0, subtotal - discountAmount);
-  const taxAmount = taxableSubtotal * (taxRate / 100);
-  const totalAmount = taxableSubtotal + taxAmount;
 
   const handleApplyCoupon = () => {
     const code = couponCode.trim().toUpperCase();
@@ -297,13 +340,13 @@ export const PosPage: React.FC = () => {
     if (code === 'COFFEE20') {
       setDiscountPercent(20);
       soundEffects.playBeep();
-      alert('Coupon COFFEE20 applied! 20% discount added.');
+      showToastNotification('Coupon COFFEE20 applied (20% OFF).', 'success');
     } else if (code === 'VIP10') {
       setDiscountPercent(10);
       soundEffects.playBeep();
-      alert('Coupon VIP10 applied! 10% discount added.');
+      showToastNotification('Coupon VIP10 applied (10% OFF).', 'success');
     } else {
-      alert('Invalid coupon code. Try "COFFEE20" or "VIP10".');
+      showToastNotification('Invalid coupon code. Try COFFEE20 or VIP10.', 'warning');
     }
   };
 
@@ -320,6 +363,7 @@ export const PosPage: React.FC = () => {
     setHeldOrders([newHeld, ...heldOrders]);
     setCart([]);
     setShowHoldModal(false);
+    showToastNotification(`Bill "${holdName}" placed on hold.`, 'info');
   };
 
   const handleResumeHeldOrder = (held: HeldOrder) => {
@@ -327,6 +371,7 @@ export const PosPage: React.FC = () => {
     setOrderType(held.orderType);
     setHeldOrders(heldOrders.filter((h) => h.id !== held.id));
     setShowHoldModal(false);
+    showToastNotification(`Resumed held bill "${held.holdName}".`, 'info');
   };
 
   const handleDeleteHeldOrder = (id: string) => {
@@ -354,6 +399,7 @@ export const PosPage: React.FC = () => {
       createdAt: new Date().toISOString(),
     };
 
+    setMobileCartOpen(false);
     setActivePaymentOrder(newOrder);
   };
 
@@ -390,7 +436,7 @@ export const PosPage: React.FC = () => {
       });
 
       soundEffects.playCashRegister();
-      showToastNotification(`Order ${serverOrder.orderNumber} recorded & synced to server!`);
+      showToastNotification(`Order ${serverOrder.orderNumber} completed & synced!`, 'success');
 
       setActivePaymentOrder(null);
       setCart([]);
@@ -400,29 +446,300 @@ export const PosPage: React.FC = () => {
       setSelectedTable(null);
       setCompletedReceiptOrder(serverOrder);
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Checkout failed on server');
+      showToastNotification(err instanceof Error ? err.message : 'Checkout failed on server', 'error');
       setActivePaymentOrder(null);
     }
   };
 
+  const renderCartWorkspace = (isMobileDrawer = false) => (
+    <div className="glass-panel rounded-2xl p-4 sm:p-5 flex flex-col justify-between h-full min-h-0 shadow-2xl overflow-hidden border border-white/10">
+      {/* Order Header & Service Mode */}
+      <div className="space-y-3.5 flex-shrink-0">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <ShoppingCart className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <h3 className="text-sm sm:text-base font-extrabold text-zinc-100 truncate">{t('currentOrder')}</h3>
+          </div>
+
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={handleRequestVoidCart}
+                className="px-2.5 py-1 rounded-lg bg-red-950/60 border border-red-500/40 text-red-300 hover:bg-red-900/60 text-[10px] font-bold flex items-center gap-1 transition-colors"
+                title="Void Cart (Manager PIN required)"
+              >
+                <Trash2 className="w-3 h-3 text-red-400" />
+                <span>Void</span>
+              </button>
+            )}
+            <span className="text-[11px] font-mono font-bold text-amber-300 bg-amber-500/15 px-2.5 py-1 rounded-full border border-amber-500/30">
+              {totalUnitCount} {t('items')}
+            </span>
+            {isMobileDrawer && (
+              <button
+                type="button"
+                onClick={() => setMobileCartOpen(false)}
+                className="p-1.5 rounded-lg bg-zinc-800 text-zinc-400 hover:text-white"
+                aria-label="Close Ticket Drawer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Service Mode Switcher */}
+        <div className="grid grid-cols-4 gap-1 p-1 bg-[#0b0c10] rounded-xl border border-white/10">
+          {(['DINE_IN', 'TAKE_AWAY', 'DELIVERY', 'DRIVE_THROUGH'] as OrderType[]).map((tType) => (
+            <button
+              key={tType}
+              type="button"
+              onClick={() => setOrderType(tType)}
+              className={`py-1.5 px-1 rounded-lg text-[10px] font-extrabold transition-all truncate ${
+                orderType === tType
+                  ? 'gold-gradient-bg text-zinc-950 shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {tType === 'DINE_IN'
+                ? t('dineIn')
+                : tType === 'TAKE_AWAY'
+                ? t('takeAway')
+                : tType === 'DELIVERY'
+                ? t('delivery')
+                : t('driveThrough')}
+            </button>
+          ))}
+        </div>
+
+        {/* Dine-In Table Selector */}
+        {orderType === 'DINE_IN' && (
+          <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-[#0b0c10] border border-amber-500/30 text-xs">
+            <span className="flex items-center gap-1.5 text-zinc-300 font-semibold">
+              <Layers className="w-3.5 h-3.5 text-amber-400" />
+              <span>Table:</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowTablePickerModal(true)}
+              className="px-3 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500 hover:text-zinc-950 border border-amber-500/40 text-amber-300 font-bold text-xs transition-colors"
+            >
+              {selectedTable ? `${selectedTable.name} (${selectedTable.tableNumber})` : 'Assign Table +'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Scrollable Ticket Items */}
+      <div className="flex-1 min-h-0 overflow-y-auto my-3 space-y-2 pr-0.5 scrollbar-thin">
+        {cart.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center py-8 px-4 space-y-2">
+            <div className="w-12 h-12 rounded-2xl bg-zinc-900/90 border border-white/10 flex items-center justify-center">
+              <Coffee className="w-6 h-6 text-amber-500/50" />
+            </div>
+            <p className="text-xs font-bold text-zinc-300">Ticket is empty</p>
+            <p className="text-[11px] text-zinc-500 max-w-[220px]">
+              Tap any coffee or pastry card on the menu to begin adding items.
+            </p>
+          </div>
+        ) : (
+          cart.map((item) => (
+            <div key={item.cartItemId} className="p-3 rounded-xl bg-[#0b0c10] border border-white/10 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <img src={item.image} alt={item.name} className="w-9 h-9 rounded-lg object-cover border border-white/10 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <h5 className="text-xs font-bold text-zinc-100 truncate">{item.name}</h5>
+                    <span className="text-[11px] text-amber-400 font-mono font-bold">${item.unitPrice.toFixed(2)}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => updateCartQuantity(item.cartItemId, -99)}
+                  className="text-zinc-500 hover:text-red-400 p-1 transition-colors flex-shrink-0"
+                  title="Remove Item"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {(item.selectedVariant || item.selectedToppings.length > 0 || item.notes) && (
+                <div className="text-[10px] text-zinc-400 pl-2 border-l-2 border-amber-500/45 space-y-0.5">
+                  {item.selectedVariant && <div>Size: {item.selectedVariant.name}</div>}
+                  {item.selectedToppings.length > 0 && (
+                    <div>+ {item.selectedToppings.map((tp) => tp.name).join(', ')}</div>
+                  )}
+                  {item.notes && (
+                    <div className="inline-flex items-center gap-1 text-amber-300 font-semibold bg-amber-500/15 px-1.5 py-0.5 rounded text-[9px] border border-amber-500/25 mt-0.5">
+                      <FileText className="w-2.5 h-2.5" />
+                      <span>{item.notes}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Quick Preparation Tags */}
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {['ផ្អែម 50%', 'ផ្អែម 0%', 'ទឹកកកតិច', 'ក្ដៅខ្លាំង'].map((tag) => {
+                  const active = item.notes?.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => toggleItemNote(item.cartItemId, tag)}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all ${
+                        active
+                          ? 'bg-amber-500 text-zinc-950 font-bold'
+                          : 'bg-zinc-900 border border-white/10 text-zinc-400 hover:text-zinc-200'
+                      }`}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between pt-1.5 border-t border-white/5">
+                <div className="flex items-center gap-1.5 bg-zinc-900 px-1.5 py-1 rounded-lg border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => updateCartQuantity(item.cartItemId, -1)}
+                    className="w-6 h-6 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-200 flex items-center justify-center font-bold text-xs"
+                  >
+                    <Minus className="w-3 h-3" />
+                  </button>
+                  <span className="text-xs font-black text-amber-300 w-5 text-center font-mono">{item.quantity}</span>
+                  <button
+                    type="button"
+                    onClick={() => updateCartQuantity(item.cartItemId, 1)}
+                    className="w-6 h-6 rounded-md bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center font-bold text-xs"
+                  >
+                    <Plus className="w-3 h-3" />
+                  </button>
+                </div>
+                <span className="text-xs font-black text-zinc-100 font-mono tabular-nums">${item.itemSubtotal.toFixed(2)}</span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Footer Totals & Checkout */}
+      <div className="pt-3 border-t border-white/10 space-y-2.5 flex-shrink-0">
+        <div className="flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowPromotionModal(true)}
+              className="text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1"
+            >
+              <Gift className="w-3.5 h-3.5 text-purple-400" />
+              <span>{discountPercent > 0 ? `${discountPercent}% ${t('discount')}` : 'Promotions'}</span>
+            </button>
+            <span className="text-zinc-600">•</span>
+            <button
+              type="button"
+              onClick={() => setShowDiscountInput(!showDiscountInput)}
+              className="text-zinc-400 hover:text-zinc-200 hover:underline text-[11px] flex items-center gap-1"
+            >
+              <Tag className="w-3 h-3" />
+              <span>Code</span>
+            </button>
+          </div>
+
+          {cart.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowSplitModal(true)}
+              className="text-amber-300 hover:text-amber-200 flex items-center gap-1 font-bold"
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>Split Bill</span>
+            </button>
+          )}
+        </div>
+
+        {showDiscountInput && (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="COFFEE20 or VIP10"
+              value={couponCode}
+              onChange={(e) => setCouponCode(e.target.value)}
+              className="flex-1 px-3 py-1.5 rounded-xl glass-input text-xs uppercase focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={handleApplyCoupon}
+              className="px-3 py-1.5 rounded-xl bg-amber-500 text-zinc-950 font-bold text-xs"
+            >
+              Apply
+            </button>
+          </div>
+        )}
+
+        <div className="space-y-1 text-xs text-zinc-400">
+          <div className="flex justify-between">
+            <span>{t('subtotal')}</span>
+            <span className="font-mono text-zinc-200 font-semibold">${subtotal.toFixed(2)}</span>
+          </div>
+          {discountAmount > 0 && (
+            <div className="flex justify-between text-emerald-400 font-semibold">
+              <span>{t('discount')} ({discountPercent}%)</span>
+              <span className="font-mono">-${discountAmount.toFixed(2)}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span>{t('tax')} ({taxRate}%)</span>
+            <span className="font-mono text-zinc-200 font-semibold">${taxAmount.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between items-baseline pt-2 border-t border-white/10 text-zinc-100">
+            <div>
+              <span className="text-sm font-extrabold">{t('totalPayable')}</span>
+              <span className="text-[11px] text-zinc-400 block font-mono">
+                ៛{(Math.round((totalAmount * khrExchangeRate) / 100) * 100).toLocaleString()} KHR
+              </span>
+            </div>
+            <span className="text-2xl font-mono font-black tabular-nums gold-gradient-text">${totalAmount.toFixed(2)}</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          disabled={cart.length === 0}
+          onClick={handleInitiateCheckout}
+          className={`w-full py-3 rounded-xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-lg ${
+            cart.length === 0
+              ? 'bg-zinc-800/80 text-zinc-500 cursor-not-allowed'
+              : 'gold-gradient-bg hover:brightness-110 active:scale-[0.99] text-zinc-950 shadow-amber-500/20'
+          }`}
+        >
+          <CreditCard className="w-4 h-4 stroke-[2.5]" />
+          <span>{t('payButton')} (${totalAmount.toFixed(2)})</span>
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="h-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-5 overflow-hidden font-sans">
-      {/* Left Area: Product Menu & Category Sidebar (8 Columns) */}
-      <div className="lg:col-span-8 flex flex-col h-full min-h-0 space-y-3 min-w-0">
-        {/* Top Control Toolbar: Categories + Sleek Action Dropdowns */}
-        <div className="flex items-center justify-between gap-3 pb-1 flex-shrink-0">
-          {/* Category Pills (Scrollable with smooth modern styling) */}
-          <div className="flex items-center space-x-2 overflow-x-auto scrollbar-none py-1 flex-1 min-w-0">
+    <div className="h-full flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-hidden font-sans relative">
+      {/* Left Area: Product Catalog Workspace */}
+      <div className="lg:col-span-7 xl:col-span-8 flex flex-col h-full min-h-0 space-y-3 min-w-0">
+        {/* Category Row + Action Dropdowns */}
+        <div className="flex items-center justify-between gap-2 flex-shrink-0">
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-0.5 flex-1 min-w-0">
             {categories.map((cat) => {
               const isSelected = selectedCategory === cat.id;
               return (
                 <button
                   key={cat.id}
+                  type="button"
                   onClick={() => setSelectedCategory(cat.id)}
-                  className={`flex items-center space-x-2 px-4 py-2 rounded-2xl text-xs font-extrabold whitespace-nowrap transition-all duration-150 ${
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                     isSelected
-                      ? 'bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 text-zinc-950 shadow-lg shadow-amber-500/20 border border-amber-300'
-                      : 'bg-zinc-900/90 border border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700 hover:bg-zinc-800/60'
+                      ? 'gold-gradient-bg text-zinc-950 shadow-md'
+                      : 'bg-white/[0.04] border border-white/10 text-zinc-300 hover:text-white hover:bg-white/[0.08]'
                   }`}
                 >
                   <Coffee className={`w-3.5 h-3.5 ${isSelected ? 'text-zinc-950' : 'text-amber-400'}`} />
@@ -432,99 +749,115 @@ export const PosPage: React.FC = () => {
             })}
           </div>
 
-          {/* Compact Action Controls: Orders + Terminal ▾ + Tools ▾ */}
-          <div className="flex items-center space-x-2 flex-shrink-0">
-            {/* 1. Orders History Modal */}
+          {/* Right Toolbar Controls */}
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             <button
-              onClick={() => setShowOrderHistoryModal(true)}
-              className="px-3.5 py-2 rounded-2xl bg-zinc-900/90 border border-amber-500/40 hover:border-amber-400 text-amber-300 text-xs font-extrabold flex items-center space-x-1.5 transition-all shadow-sm hover:shadow-amber-500/10"
-              title="Order History, Re-print Receipt & Refunds (ប្រវត្តិវិក្កយបត្រ)"
+              type="button"
+              onClick={() => setCompactGrid((prev) => !prev)}
+              className="hidden sm:flex p-2 rounded-xl bg-white/[0.04] border border-white/10 text-zinc-300 hover:text-amber-300 transition-colors"
+              title={compactGrid ? 'Switch to Comfort Cards' : 'Switch to Compact Grid'}
             >
-              <History className="w-3.5 h-3.5 text-amber-400" />
-              <span>Orders</span>
+              {compactGrid ? <LayoutGrid className="w-4 h-4" /> : <Rows3 className="w-4 h-4" />}
             </button>
 
-            {/* 2. Terminal Dropdown Menu */}
-            <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowOrderHistoryModal(true)}
+              className="px-3 py-2 rounded-xl bg-white/[0.04] border border-amber-500/35 hover:border-amber-400 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
+              title="Order History, Re-print & Refunds"
+            >
+              <History className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Orders</span>
+            </button>
+
+            {/* Terminal Dropdown */}
+            <div className="relative" ref={terminalMenuRef}>
               <button
+                type="button"
                 onClick={() => {
-                  setShowTerminalMenu(!showTerminalMenu);
+                  setShowTerminalMenu((prev) => !prev);
                   setShowToolsMenu(false);
                 }}
-                className="px-3 py-2 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 text-zinc-200 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+                className="px-2.5 sm:px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 hover:border-white/25 text-zinc-200 text-xs font-bold flex items-center gap-1.5 transition-colors"
               >
                 <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                <span>Terminal</span>
+                <span className="hidden md:inline">Terminal</span>
                 <ChevronDown className="w-3 h-3 text-zinc-400" />
               </button>
 
               {showTerminalMenu && (
-                <div 
-                  className="absolute right-0 top-11 w-64 bg-[#121217] border border-zinc-700 rounded-2xl p-2 shadow-2xl space-y-1 z-50 animate-in fade-in zoom-in-95"
+                <div
+                  className="absolute right-0 top-11 w-64 glass-panel border border-white/15 rounded-2xl p-2 shadow-2xl space-y-1 z-50"
                   onClick={() => setShowTerminalMenu(false)}
                 >
-                  <div className="text-[10px] text-zinc-400 font-semibold px-2.5 py-1 uppercase border-b border-zinc-800 mb-1">
-                    Shift & Terminal Management
+                  <div className="text-[10px] text-zinc-400 font-bold px-2.5 py-1 uppercase border-b border-white/10 mb-1">
+                    Shift & Terminal
                   </div>
                   <button
+                    type="button"
                     onClick={() => setShowXReportModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <ArrowRightLeft className="w-4 h-4 text-amber-400" />
                     <div>
-                      <span className="font-bold block">X-Report (ប្តូរវេន)</span>
-                      <span className="text-[10px] text-zinc-400">Shift Handover & Cash Count</span>
+                      <span className="font-bold block">X-Report Shift Handover</span>
+                      <span className="text-[10px] text-zinc-400">Cash count & drawer check</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowZReportModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <FileSpreadsheet className="w-4 h-4 text-amber-400" />
                     <div>
-                      <span className="font-bold block">Z-Report (បិទបញ្ជី)</span>
-                      <span className="text-[10px] text-zinc-400">End-of-Day Closeout</span>
+                      <span className="font-bold block">Z-Report Closeout</span>
+                      <span className="text-[10px] text-zinc-400">End-of-day reconciliation</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowPettyCashModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-emerald-400 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <Wallet className="w-4 h-4 text-emerald-400" />
                     <div>
-                      <span className="font-bold block">Petty Cash (កត់ចំណាយ)</span>
-                      <span className="text-[10px] text-zinc-400">Daily Store Expense</span>
+                      <span className="font-bold block">Petty Cash Expenses</span>
+                      <span className="text-[10px] text-zinc-400">Log store expenses</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={handleOpenCashDrawerNoSale}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <KeyRound className="w-4 h-4 text-amber-400" />
                     <div>
                       <span className="font-bold block">Open Drawer (No Sale)</span>
-                      <span className="text-[10px] text-zinc-400">Manual Solenoid Kick</span>
+                      <span className="text-[10px] text-zinc-400">Manager PIN kick</span>
                     </div>
                   </button>
                   {(user?.role === 'ADMIN' || user?.role === 'MANAGER') && (
                     <button
+                      type="button"
                       onClick={() => setShowSecurityAuditModal(true)}
-                      className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-emerald-400 transition-colors"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                     >
                       <ShieldCheck className="w-4 h-4 text-emerald-400" />
                       <div>
                         <span className="font-bold block">Security Audit Log</span>
-                        <span className="text-[10px] text-zinc-400">Anti-Theft Activity Trail</span>
+                        <span className="text-[10px] text-zinc-400">Activity trail</span>
                       </div>
                     </button>
                   )}
-                  <div className="border-t border-zinc-800 my-1"></div>
+                  <div className="border-t border-white/10 my-1" />
                   <button
+                    type="button"
                     onClick={() => {
-                      logSecurityEvent('SCREEN_LOCK', 'Terminal Locked', 'Cashier manually locked register screen', user?.name || 'Staff');
+                      void logSecurityEvent('SCREEN_LOCK', 'Terminal Locked', 'Cashier locked register screen', user?.name || 'Staff');
                       setIsScreenLocked(true);
                     }}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-red-300 hover:bg-red-950/40 transition-colors"
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-left text-red-300 hover:bg-red-950/40"
                   >
                     <Lock className="w-4 h-4 text-red-400" />
                     <span className="font-bold">Lock Register Screen</span>
@@ -533,71 +866,77 @@ export const PosPage: React.FC = () => {
               )}
             </div>
 
-            {/* 3. Tools & Features Dropdown Menu */}
-            <div className="relative">
+            {/* Tools Dropdown */}
+            <div className="relative" ref={toolsMenuRef}>
               <button
+                type="button"
                 onClick={() => {
-                  setShowToolsMenu(!showToolsMenu);
+                  setShowToolsMenu((prev) => !prev);
                   setShowTerminalMenu(false);
                 }}
-                className="px-3 py-2 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-zinc-700 text-zinc-200 text-xs font-bold flex items-center space-x-1.5 transition-colors"
+                className="px-2.5 sm:px-3 py-2 rounded-xl bg-white/[0.04] border border-white/10 hover:border-white/25 text-zinc-200 text-xs font-bold flex items-center gap-1.5 transition-colors"
               >
                 <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <span>Tools</span>
+                <span className="hidden md:inline">Tools</span>
                 <ChevronDown className="w-3 h-3 text-zinc-400" />
               </button>
 
               {showToolsMenu && (
-                <div 
-                  className="absolute right-0 top-11 w-64 bg-[#121217] border border-zinc-700 rounded-2xl p-2 shadow-2xl space-y-1 z-50 animate-in fade-in zoom-in-95"
+                <div
+                  className="absolute right-0 top-11 w-64 glass-panel border border-white/15 rounded-2xl p-2 shadow-2xl space-y-1 z-50"
                   onClick={() => setShowToolsMenu(false)}
                 >
-                  <div className="text-[10px] text-zinc-400 font-semibold px-2.5 py-1 uppercase border-b border-zinc-800 mb-1">
-                    Smart Features & AI
+                  <div className="text-[10px] text-zinc-400 font-bold px-2.5 py-1 uppercase border-b border-white/10 mb-1">
+                    Smart Café Tools
                   </div>
                   <button
+                    type="button"
                     onClick={() => setShowAiBaristaModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <Cpu className="w-4 h-4 text-amber-400" />
                     <div>
                       <span className="font-bold block">AI Barista Assistant</span>
-                      <span className="text-[10px] text-zinc-400">Flavor profile & recipe guide</span>
+                      <span className="text-[10px] text-zinc-400">Flavor profile & recipes</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowQrSelfOrderModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <QrCode className="w-4 h-4 text-amber-400" />
                     <div>
                       <span className="font-bold block">Customer QR Kiosk</span>
-                      <span className="text-[10px] text-zinc-400">Table & counter self-ordering</span>
+                      <span className="text-[10px] text-zinc-400">Self-ordering QR display</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowPromotionModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-purple-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <Sparkles className="w-4 h-4 text-purple-400" />
                     <div>
                       <span className="font-bold block">Promotions Engine</span>
-                      <span className="text-[10px] text-zinc-400">Happy Hour & discounts</span>
+                      <span className="text-[10px] text-zinc-400">Happy Hour & vouchers</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowGiftCardWalletModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-purple-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <Gift className="w-4 h-4 text-purple-400" />
                     <div>
                       <span className="font-bold block">Gift Card & Wallet</span>
-                      <span className="text-[10px] text-zinc-400">Balance top-up & lookup</span>
+                      <span className="text-[10px] text-zinc-400">Top-up & lookup</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowCashDrawerModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <Lock className="w-4 h-4 text-amber-400" />
                     <div>
@@ -606,23 +945,25 @@ export const PosPage: React.FC = () => {
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowAiForecastModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-amber-300 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
                     <Sparkles className="w-4 h-4 text-amber-400" />
                     <div>
                       <span className="font-bold block">{t('aiForecast')}</span>
-                      <span className="text-[10px] text-zinc-400">Demand & sales prediction</span>
+                      <span className="text-[10px] text-zinc-400">Demand prediction</span>
                     </div>
                   </button>
                   <button
+                    type="button"
                     onClick={() => setShowBroadcastModal(true)}
-                    className="w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-zinc-800 hover:text-blue-400 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs text-left text-zinc-200 hover:bg-white/[0.06]"
                   >
-                    <Megaphone className="w-4 h-4 text-blue-400" />
+                    <Megaphone className="w-4 h-4 text-sky-400" />
                     <div>
                       <span className="font-bold block">Store Notice Banner</span>
-                      <span className="text-[10px] text-zinc-400">Broadcast messages</span>
+                      <span className="text-[10px] text-zinc-400">Broadcast alerts</span>
                     </div>
                   </button>
                 </div>
@@ -631,491 +972,316 @@ export const PosPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Store Broadcast Notice Banner */}
+        {/* Store Broadcast Ticker */}
         <BroadcastBanner onOpenManager={() => setShowBroadcastModal(true)} />
 
-        {/* Search Bar & Hold Order Barcode Simulator */}
-        <div className="flex items-center space-x-3 flex-shrink-0">
+        {/* Search + Held Bills + Barcode Trigger */}
+        <div className="flex items-center gap-2 flex-shrink-0">
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3.5" />
+            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-3" />
             <input
               type="text"
               placeholder={t('searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 rounded-2xl glass-input text-zinc-100 text-sm focus:outline-none placeholder-zinc-500 shadow-inner"
+              className="w-full pl-10 pr-8 py-2.5 rounded-xl glass-input text-xs sm:text-sm focus:outline-none placeholder-zinc-500"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-2.5 p-0.5 text-zinc-400 hover:text-zinc-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <button
+            type="button"
             onClick={() => setShowHoldModal(true)}
-            className="px-3.5 py-2.5 rounded-2xl bg-zinc-900/90 border border-zinc-700/80 hover:border-amber-500/50 text-amber-300 text-xs font-bold flex items-center space-x-2 transition-all shadow-sm relative"
+            className="px-3 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 hover:border-amber-500/45 text-amber-300 text-xs font-bold flex items-center gap-1.5 transition-colors flex-shrink-0"
           >
             <PauseCircle className="w-4 h-4 text-amber-400" />
             <span className="hidden sm:inline">{t('holdQueue')}</span>
             {heldOrders.length > 0 && (
-              <span className="w-5 h-5 rounded-full bg-gradient-to-r from-amber-500 to-yellow-400 text-zinc-950 text-[10px] font-black flex items-center justify-center shadow-md">
+              <span className="w-5 h-5 rounded-full gold-gradient-bg text-zinc-950 text-[10px] font-black flex items-center justify-center">
                 {heldOrders.length}
               </span>
             )}
           </button>
 
           <div
-            className="hidden sm:flex items-center space-x-1.5 px-3 py-2 rounded-2xl bg-zinc-900/90 border border-emerald-500/40 text-emerald-400 text-xs font-mono font-bold shadow-inner"
-            title="Hardware USB Barcode Scanner is listening globally. Scan any SKU or Barcode directly!"
+            className="hidden xl:flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs font-mono font-bold flex-shrink-0"
+            title="USB Barcode Scanner is active globally"
           >
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400"></span>
-            <span className="hidden md:inline">Scanner Active</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Scanner</span>
           </div>
 
           <button
+            type="button"
             onClick={() => {
               const testProduct = products[0];
               if (testProduct) {
                 handleProductClick(testProduct);
                 soundEffects.playBeep();
                 setLastScannedItem(`${testProduct.name} (${testProduct.barcode})`);
-                setTimeout(() => setLastScannedItem(null), 3500);
+                setTimeout(() => setLastScannedItem(null), 3200);
               }
             }}
-            className="px-4 py-2.5 rounded-2xl bg-zinc-900/90 border border-zinc-800 hover:border-amber-500/50 text-zinc-300 hover:text-white text-xs font-bold flex items-center space-x-2 transition-colors shadow-sm"
-            title="Click to test barcode scan trigger"
+            className="px-3 py-2.5 rounded-xl bg-white/[0.04] border border-white/10 hover:border-amber-500/45 text-zinc-300 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-colors flex-shrink-0"
+            title="Quick SKU Scan Trigger"
           >
             <Barcode className="w-4 h-4 text-amber-400" />
             <span className="hidden sm:inline">{t('scanSku')}</span>
           </button>
         </div>
 
-        {/* Products Touch Grid */}
-        <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-20 scrollbar-thin">
-          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3.5">
-            {filteredProducts.map((product) => {
-              const cartQty = cart
-                .filter((item) => item.productId === product.id)
-                .reduce((sum, item) => sum + item.quantity, 0);
+        {/* Scrollable Products Grid */}
+        <div className="flex-1 min-h-0 overflow-y-auto pr-1 pb-24 lg:pb-4 scrollbar-thin">
+          {filteredProducts.length === 0 ? (
+            <div className="py-16 text-center glass-card rounded-2xl space-y-2">
+              <Coffee className="w-10 h-10 text-zinc-600 mx-auto" />
+              <p className="text-sm font-bold text-zinc-300">No items match your filter</p>
+              <button
+                type="button"
+                onClick={() => { setSelectedCategory('cat-1'); setSearchQuery(''); }}
+                className="px-3.5 py-1.5 rounded-xl bg-white/[0.05] text-amber-300 text-xs font-bold"
+              >
+                Show All Menu Items
+              </button>
+            </div>
+          ) : (
+            <div
+              className={`grid gap-3 ${
+                compactGrid
+                  ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5'
+                  : 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-4'
+              }`}
+            >
+              {filteredProducts.map((product) => {
+                const cartQty = cart
+                  .filter((item) => item.productId === product.id)
+                  .reduce((sum, item) => sum + item.quantity, 0);
 
-              return (
-                <div
-                  key={product.id}
-                  className={`bg-[#121217] border rounded-3xl p-3 text-left flex flex-col justify-between transition-all duration-200 shadow-xl group relative overflow-hidden ${
-                    !product.isAvailable
-                      ? 'border-red-500/30 opacity-70'
-                      : cartQty > 0
-                      ? 'border-amber-500/90 shadow-xl shadow-amber-500/15 ring-1 ring-amber-500/50 bg-[#15151c]'
-                      : 'border-zinc-800/80 hover:border-amber-500/50 hover:shadow-2xl hover:shadow-amber-500/10 hover:-translate-y-1'
-                  }`}
-                >
-                  <button onClick={() => handleProductClick(product)} className="w-full text-left">
-                    <div className="relative h-32 rounded-2xl overflow-hidden mb-3 bg-zinc-950">
-                      <img
-                        src={product.image}
-                        alt={product.name}
-                        className={`w-full h-full object-cover transition-transform duration-500 ${
-                          !product.isAvailable ? 'grayscale opacity-60' : 'group-hover:scale-105'
-                        }`}
-                      />
+                return (
+                  <div
+                    key={product.id}
+                    className={`glass-card glass-card-hover rounded-2xl p-2.5 sm:p-3 text-left flex flex-col justify-between group relative overflow-hidden ${
+                      !product.isAvailable
+                        ? 'border-red-500/30 opacity-70'
+                        : cartQty > 0
+                        ? 'border-amber-500/80 ring-1 ring-amber-500/35'
+                        : ''
+                    }`}
+                  >
+                    <button type="button" onClick={() => handleProductClick(product)} className="w-full text-left">
+                      <div className={`relative ${compactGrid ? 'h-24' : 'h-28 sm:h-32'} rounded-xl overflow-hidden mb-2.5 bg-zinc-950`}>
+                        <img
+                          src={product.image}
+                          alt={product.name}
+                          className={`w-full h-full object-cover transition-transform duration-300 ${
+                            !product.isAvailable ? 'grayscale opacity-50' : 'group-hover:scale-105'
+                          }`}
+                        />
 
-                      {/* Quantity in Cart Badge */}
-                      {cartQty > 0 && (
-                        <div className="absolute top-2 left-2 z-10 px-2.5 py-1 rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-extrabold text-[11px] shadow-lg shadow-black/60 border border-emerald-300/50 flex items-center space-x-1 animate-in zoom-in-75">
-                          <span>✓ {cartQty}</span>
-                          <span className="text-[9px] font-bold">ក្នុងកន្ត្រក</span>
-                        </div>
+                        {cartQty > 0 && (
+                          <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-emerald-500 text-zinc-950 font-black text-[11px] shadow-md">
+                            {cartQty}x
+                          </div>
+                        )}
+
+                        {!product.isAvailable ? (
+                          <div className="absolute inset-0 bg-black/65 flex items-center justify-center">
+                            <span className="px-2.5 py-1 rounded-lg bg-red-600 text-white font-extrabold text-[10px] uppercase tracking-wider">
+                              Out of Stock
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="absolute top-2 right-2 px-2 py-0.5 rounded-lg gold-gradient-bg text-zinc-950 font-black font-mono text-xs shadow-md">
+                            ${product.sellingPrice.toFixed(2)}
+                          </div>
+                        )}
+                      </div>
+
+                      <h4 className="text-xs sm:text-sm font-extrabold text-zinc-100 line-clamp-1 group-hover:text-amber-300 transition-colors">
+                        {product.name}
+                      </h4>
+                      {!compactGrid && (
+                        <p className="text-[11px] text-zinc-400 line-clamp-2 mt-1 leading-snug">
+                          {product.description}
+                        </p>
                       )}
 
-                      {!product.isAvailable ? (
-                        <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center">
-                          <span className="px-3 py-1 rounded-full bg-red-600 text-white font-extrabold text-[10px] uppercase tracking-wider shadow-lg">
-                            ⚠️ OUT OF STOCK
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="absolute top-2 right-2 px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 font-black text-xs shadow-lg shadow-black/60 border border-amber-300/40">
-                          ${product.sellingPrice.toFixed(2)}
-                        </div>
-                      )}
-                    </div>
-
-                    <h4 className="text-sm font-extrabold text-zinc-100 line-clamp-1 group-hover:text-amber-300 transition-colors">
-                      {product.name}
-                    </h4>
-                    <p className="text-[11px] text-zinc-400 line-clamp-2 mt-1 leading-snug">
-                      {product.description}
-                    </p>
-
-                    <div className="mt-2 pt-2 border-t border-zinc-800/60 flex items-center justify-between text-[10px] font-mono text-zinc-500">
-                      <span>SKU: {product.sku}</span>
-                      <span className={product.isAvailable ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
-                        {product.isAvailable ? '● In Stock' : '✕ Unavailable'}
-                      </span>
-                    </div>
-                  </button>
-
-                  <div className="mt-3 flex items-center justify-between pt-2 border-t border-zinc-800/80 text-[11px]">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRecipeProduct(product);
-                      }}
-                      className="px-2 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-amber-400 hover:border-amber-500/40 font-mono text-[10px] flex items-center space-x-1 transition-colors"
-                      title="View Recipe & Ingredients"
-                    >
-                      <BookOpen className="w-3 h-3 text-amber-400" />
-                      <span>Recipe</span>
+                      <div className="mt-2 pt-1.5 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-zinc-500">
+                        <span className="truncate">{product.sku}</span>
+                        <span className={product.isAvailable ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
+                          {product.isAvailable ? 'Available' : 'Empty'}
+                        </span>
+                      </div>
                     </button>
 
-                    {cartQty > 0 ? (
-                      <div
-                        className="flex items-center space-x-1.5 bg-[#09090c] border border-amber-500/70 rounded-xl px-2 py-0.5 shadow-md"
-                        onClick={(e) => e.stopPropagation()}
+                    <div className="mt-2.5 flex items-center justify-between pt-2 border-t border-white/5 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRecipeProduct(product);
+                        }}
+                        className="px-2 py-1 rounded-lg bg-white/[0.04] border border-white/10 text-zinc-400 hover:text-amber-400 font-mono text-[10px] flex items-center gap-1 transition-colors"
                       >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const targetItem = cart.find((i) => i.productId === product.id);
-                            if (targetItem) updateCartQuantity(targetItem.cartItemId, -1);
-                          }}
-                          className="w-5 h-5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 flex items-center justify-center font-bold text-xs"
-                          title="Deduct 1"
+                        <BookOpen className="w-3 h-3 text-amber-400" />
+                        <span>Recipe</span>
+                      </button>
+
+                      {cartQty > 0 ? (
+                        <div
+                          className="flex items-center gap-1 bg-zinc-950 border border-amber-500/60 rounded-lg px-1.5 py-0.5"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          -
-                        </button>
-                        <span className="text-xs font-black text-amber-300 font-mono px-1">
-                          {cartQty}
-                        </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const targetItem = cart.find((i) => i.productId === product.id);
+                              if (targetItem) updateCartQuantity(targetItem.cartItemId, -1);
+                            }}
+                            className="w-5 h-5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 flex items-center justify-center font-bold text-xs"
+                          >
+                            -
+                          </button>
+                          <span className="text-xs font-black text-amber-300 font-mono px-1">{cartQty}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleProductClick(product)}
+                            className="w-5 h-5 rounded bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center font-bold text-xs"
+                          >
+                            +
+                          </button>
+                        </div>
+                      ) : (
                         <button
                           type="button"
                           onClick={() => handleProductClick(product)}
-                          className="w-5 h-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center font-bold text-xs"
-                          title="Add 1 more"
+                          disabled={!product.isAvailable}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                            !product.isAvailable
+                              ? 'text-zinc-600 cursor-not-allowed'
+                              : 'bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-zinc-950 border border-amber-500/35'
+                          }`}
                         >
-                          +
+                          Add +
                         </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => handleProductClick(product)}
-                        disabled={!product.isAvailable}
-                        className={`px-3 py-1 rounded-xl text-xs font-bold transition-all flex items-center space-x-1 ${
-                          !product.isAvailable
-                            ? 'text-zinc-600 cursor-not-allowed'
-                            : 'bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-zinc-950 border border-amber-500/40 hover:shadow-md'
-                        }`}
-                      >
-                        <span>Select +</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* Right Area: Order Cart Workspace (4 Columns) */}
-      <div className="lg:col-span-4 bg-[#0d0d12]/95 border border-zinc-800/90 rounded-3xl p-5 flex flex-col justify-between glass-panel h-full min-h-0 shadow-2xl overflow-hidden">
-        {/* Order Header & Type Selector */}
-        <div className="space-y-4 flex-shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <ShoppingCart className="w-5 h-5 text-amber-400" />
-              <h3 className="text-base font-extrabold text-zinc-100">{t('currentOrder')}</h3>
-            </div>
-            <div className="flex items-center space-x-2">
-              {cart.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleRequestVoidCart}
-                  className="px-2.5 py-1 rounded-xl bg-red-950/60 border border-red-700/50 text-red-300 hover:bg-red-900/60 text-[10px] font-bold flex items-center space-x-1 transition-colors"
-                  title="Void Cart (Manager PIN required)"
-                >
-                  <Trash2 className="w-3 h-3 text-red-400" />
-                  <span>Void Cart</span>
-                </button>
-              )}
-              <span className="text-xs font-mono font-black text-amber-300 bg-amber-500/15 px-3 py-1 rounded-full border border-amber-500/30">
-                {cart.length} {t('items')}
-              </span>
-            </div>
-          </div>
-
-          {/* Order Type Selector */}
-          <div className="grid grid-cols-4 gap-1 p-1 bg-[#121217] rounded-2xl border border-zinc-800">
-            {(['DINE_IN', 'TAKE_AWAY', 'DELIVERY', 'DRIVE_THROUGH'] as OrderType[]).map((tType) => (
-              <button
-                key={tType}
-                onClick={() => setOrderType(tType)}
-                className={`py-2 rounded-xl text-[10px] font-extrabold transition-all ${
-                  orderType === tType
-                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-zinc-950 shadow-md font-black'
-                    : 'text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                {tType === 'DINE_IN' ? t('dineIn') : tType === 'TAKE_AWAY' ? t('takeAway') : tType === 'DELIVERY' ? t('delivery') : t('driveThrough')}
-              </button>
-            ))}
-          </div>
-
-          {/* Dine-In Table Picker Pill */}
-          {orderType === 'DINE_IN' && (
-            <div className="flex items-center justify-between p-2.5 rounded-2xl bg-[#14141a] border border-amber-500/30 text-xs shadow-sm">
-              <span className="flex items-center space-x-1.5 text-zinc-300 font-semibold">
-                <Layers className="w-4 h-4 text-amber-400" />
-                <span>តុអង្គុយ (Table):</span>
-              </span>
-              <button
-                type="button"
-                onClick={() => setShowTablePickerModal(true)}
-                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:brightness-110 text-zinc-950 font-black text-xs shadow flex items-center space-x-1 transition-all"
-              >
-                <span>{selectedTable ? `${selectedTable.name} (${selectedTable.tableNumber})` : '+ ជ្រើសរើសលេខតុ'}</span>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Cart Item Stream */}
-        <div className="flex-1 min-h-0 overflow-y-auto my-3 space-y-2.5 pr-1 scrollbar-thin">
-          {cart.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-6 space-y-2">
-              <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-600">
-                <Coffee className="w-7 h-7 text-amber-500/40" />
-              </div>
-              <p className="text-xs font-bold text-zinc-300">Cart is empty</p>
-              <p className="text-[11px] text-zinc-500">Select drinks or bakery items from the menu to start order</p>
-            </div>
-          ) : (
-            cart.map((item) => (
-              <div key={item.cartItemId} className="p-3 rounded-2xl bg-[#121217] border border-zinc-800/80 space-y-2">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center space-x-2.5 overflow-hidden">
-                    <img src={item.image} alt={item.name} className="w-9 h-9 rounded-xl object-cover border border-zinc-700/50" />
-                    <div className="overflow-hidden">
-                      <h5 className="text-xs font-extrabold text-zinc-200 truncate">{item.name}</h5>
-                      <span className="text-[10px] text-amber-400 font-mono font-bold">${item.unitPrice.toFixed(2)}</span>
+                      )}
                     </div>
                   </div>
-                  <button
-                    onClick={() => updateCartQuantity(item.cartItemId, -99)}
-                    className="text-zinc-500 hover:text-red-400 p-1 transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Variant & Toppings info */}
-                {(item.selectedVariant || item.selectedToppings.length > 0 || item.notes) && (
-                  <div className="text-[10px] text-zinc-400 pl-2 border-l-2 border-amber-500/50 space-y-0.5">
-                    {item.selectedVariant && <div>Size: {item.selectedVariant.name}</div>}
-                    {item.selectedToppings.length > 0 && (
-                      <div>+ {item.selectedToppings.map((tp) => tp.name).join(', ')}</div>
-                    )}
-                    {item.notes && (
-                      <div className="text-amber-300 font-bold bg-amber-500/15 px-1.5 py-0.5 rounded text-[9px] inline-block border border-amber-500/30">
-                        📝 {item.notes}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 1-Click Fast Modifier Chips */}
-                <div className="flex flex-wrap gap-1 pt-1">
-                  {[
-                    'ផ្អែម 50%',
-                    'ផ្អែម 0%',
-                    'ទឹកកកតិច',
-                    'ក្ដៅខ្លាំង',
-                    'កែវផ្ទាល់ខ្លួន',
-                  ].map((tag) => {
-                    const active = item.notes?.includes(tag);
-                    return (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() => toggleItemNote(item.cartItemId, tag)}
-                        className={`px-2 py-0.5 rounded-lg text-[9px] font-bold transition-all ${
-                          active
-                            ? 'bg-amber-500 text-zinc-950 font-black shadow-sm'
-                            : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-zinc-200'
-                        }`}
-                      >
-                        {tag}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Quantity Controller & Subtotal */}
-                <div className="flex items-center justify-between pt-1 border-t border-zinc-800/80">
-                  <div className="flex items-center space-x-2 bg-[#09090c] px-2 py-1 rounded-xl border border-zinc-800">
-                    <button
-                      onClick={() => updateCartQuantity(item.cartItemId, -1)}
-                      className="w-5 h-5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 flex items-center justify-center font-bold text-xs"
-                    >
-                      -
-                    </button>
-                    <span className="text-xs font-black text-amber-300 w-5 text-center font-mono">{item.quantity}</span>
-                    <button
-                      onClick={() => updateCartQuantity(item.cartItemId, 1)}
-                      className="w-5 h-5 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 flex items-center justify-center font-bold text-xs"
-                    >
-                      +
-                    </button>
-                  </div>
-                  <span className="text-xs font-black text-zinc-100 font-mono">${item.itemSubtotal.toFixed(2)}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Bill Breakdown & Checkout Bar */}
-        <div className="pt-4 border-t border-zinc-800/80 space-y-3 flex-shrink-0">
-          {/* Coupon Code & Split Bill Bar */}
-          <div className="flex items-center justify-between text-xs">
-            <div className="flex items-center space-x-2">
-              <button
-                onClick={() => setShowPromotionModal(true)}
-                className="text-amber-400 hover:text-amber-300 font-bold flex items-center space-x-1"
-                title="Open Promotions & Happy Hour Engine"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <span>{discountPercent > 0 ? `${discountPercent}% ${t('discount')}` : '🎁 Promos & Deals'}</span>
-              </button>
-              <span className="text-zinc-600">•</span>
-              <button
-                onClick={() => setShowDiscountInput(!showDiscountInput)}
-                className="text-zinc-400 hover:text-zinc-200 hover:underline text-[11px]"
-              >
-                Code
-              </button>
-            </div>
-
-            {cart.length > 0 && (
-              <button
-                onClick={() => setShowSplitModal(true)}
-                className="text-amber-300 hover:text-amber-200 flex items-center space-x-1 font-bold"
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5" />
-                <span>Split Bill</span>
-              </button>
-            )}
-          </div>
-
-          {showDiscountInput && (
-            <div className="flex items-center space-x-2">
-              <input
-                type="text"
-                placeholder="Try COFFEE20"
-                value={couponCode}
-                onChange={(e) => setCouponCode(e.target.value)}
-                className="flex-1 px-3 py-1.5 rounded-xl glass-input text-xs uppercase"
-              />
-              <button
-                onClick={handleApplyCoupon}
-                className="px-3 py-1.5 rounded-xl bg-amber-500 text-zinc-950 font-bold text-xs"
-              >
-                Apply
-              </button>
+                );
+              })}
             </div>
           )}
-
-          {/* Subtotal, Tax, Total with Dual Currency (USD & KHR) */}
-          <div className="space-y-1.5 text-xs text-zinc-400 font-sans">
-            <div className="flex justify-between">
-              <span>{t('subtotal')}</span>
-              <span className="font-mono text-zinc-200 font-bold">${subtotal.toFixed(2)}</span>
-            </div>
-            {discountAmount > 0 && (
-              <div className="flex justify-between text-emerald-400 font-semibold">
-                <span>{t('discount')} ({discountPercent}%)</span>
-                <span className="font-mono font-bold">-${discountAmount.toFixed(2)}</span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span>{t('tax')} ({taxRate}% VAT)</span>
-              <span className="font-mono text-zinc-200 font-bold">${taxAmount.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between items-baseline pt-2 border-t border-zinc-800 text-base font-extrabold text-zinc-100">
-              <div>
-                <span>{t('totalPayable')}</span>
-                <span className="text-[11px] font-normal text-zinc-400 block font-mono">
-                  ៛{(Math.round(totalAmount * khrExchangeRate / 100) * 100).toLocaleString()} KHR
-                </span>
-              </div>
-              <span className="text-2xl font-mono font-black text-amber-400 gold-gradient-text">${totalAmount.toFixed(2)}</span>
-            </div>
-          </div>
-
-          {/* Pay Button */}
-          <button
-            disabled={cart.length === 0}
-            onClick={handleInitiateCheckout}
-            className={`w-full py-3.5 rounded-2xl font-black text-base flex items-center justify-center space-x-2.5 transition-all shadow-xl ${
-              cart.length === 0
-                ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
-                : 'bg-gradient-to-r from-amber-400 via-amber-500 to-yellow-500 hover:brightness-110 active:scale-[0.99] text-zinc-950 shadow-amber-500/25 cursor-pointer'
-            }`}
-          >
-            <CreditCard className="w-5 h-5 stroke-[2.5]" />
-            <span>{t('payButton')} (${totalAmount.toFixed(2)})</span>
-          </button>
         </div>
       </div>
 
-      {/* Out of Stock Warning Modal */}
+      {/* Desktop Right Side: Order Cart Workspace */}
+      <div className="hidden lg:flex lg:col-span-5 xl:col-span-4 flex-col h-full min-h-0">
+        {renderCartWorkspace(false)}
+      </div>
+
+      {/* Mobile & Tablet Floating Bottom Ticket Dock (< lg) */}
+      <div className="lg:hidden fixed bottom-3 inset-x-3 z-30 safe-pb">
+        <div className="glass-panel border border-amber-500/40 rounded-2xl p-2.5 px-3.5 shadow-2xl flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setMobileCartOpen(true)}
+            className="flex items-center gap-3 min-w-0 text-left flex-1"
+          >
+            <div className="relative w-10 h-10 rounded-xl gold-gradient-bg flex items-center justify-center text-zinc-950 flex-shrink-0 shadow-md">
+              <ShoppingCart className="w-5 h-5 stroke-[2.2]" />
+              {totalUnitCount > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-zinc-950 border border-amber-400 text-amber-300 text-[10px] font-black flex items-center justify-center">
+                  {totalUnitCount}
+                </span>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-extrabold text-zinc-100 truncate">
+                {totalUnitCount > 0 ? `${totalUnitCount} ${t('items')} • ${selectedTable?.name || orderType.replace('_', ' ')}` : t('currentOrder')}
+              </div>
+              <div className="text-sm font-black font-mono text-amber-400 tabular-nums">
+                ${totalAmount.toFixed(2)}
+              </div>
+            </div>
+          </button>
+
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onClick={() => setMobileCartOpen(true)}
+              className="px-3 py-2 rounded-xl bg-white/[0.06] border border-white/15 text-zinc-100 text-xs font-bold"
+            >
+              Ticket
+            </button>
+            <button
+              type="button"
+              disabled={cart.length === 0}
+              onClick={handleInitiateCheckout}
+              className="px-4 py-2 rounded-xl gold-gradient-bg disabled:opacity-40 text-zinc-950 font-black text-xs shadow-md"
+            >
+              Pay
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile & Tablet Slide-Over Cart Sheet (< lg) */}
+      {mobileCartOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex justify-end">
+          <div className="fixed inset-0 bg-black/75 backdrop-blur-sm" onClick={() => setMobileCartOpen(false)} />
+          <div className="relative w-full max-w-md h-full p-3 bg-[#08090c] z-10 flex flex-col">
+            {renderCartWorkspace(true)}
+          </div>
+        </div>
+      )}
+
+      {/* Out of Stock Modal */}
       {outOfStockProduct && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-          <div className="bg-stone-900 border border-red-500/60 rounded-3xl w-full max-w-md p-6 text-center space-y-4 shadow-2xl animate-in zoom-in-95">
-            <div className="w-16 h-16 rounded-full bg-red-500/20 border border-red-500 flex items-center justify-center text-red-400 mx-auto">
-              <AlertTriangle className="w-8 h-8" />
+          <div className="glass-panel border border-red-500/50 rounded-2xl w-full max-w-md p-6 text-center space-y-4 shadow-2xl">
+            <div className="w-14 h-14 rounded-2xl bg-red-500/15 border border-red-500/40 flex items-center justify-center text-red-400 mx-auto">
+              <AlertTriangle className="w-7 h-7" />
             </div>
-            <h3 className="text-xl font-bold text-stone-100">Product Out of Stock!</h3>
-            <p className="text-xs text-stone-400">
-              <span className="text-amber-300 font-bold">{outOfStockProduct.name}</span> is currently unavailable or raw ingredients are depleted.
+            <h3 className="text-lg font-extrabold text-zinc-100">Product Out of Stock</h3>
+            <p className="text-xs text-zinc-400">
+              <span className="text-amber-300 font-bold">{outOfStockProduct.name}</span> is currently marked unavailable or depleted.
             </p>
-            <div className="pt-2 flex items-center justify-center space-x-3">
+            <div className="pt-2 flex items-center justify-center gap-2.5">
               <button
+                type="button"
                 onClick={() => setOutOfStockProduct(null)}
-                className="px-5 py-2.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-bold"
               >
-                Close Notice
+                Close
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setOutOfStockProduct(null);
-                  window.location.href = '/inventory';
+                  navigate('/inventory');
                 }}
-                className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-stone-950 text-xs font-bold flex items-center space-x-1.5"
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-extrabold flex items-center gap-1.5"
               >
                 <Package className="w-4 h-4" />
-                <span>Go to Inventory & Restock</span>
+                <span>Manage Inventory</span>
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modals */}
-      {showAiBaristaModal && (
-        <AiBaristaModal
-          onClose={() => setShowAiBaristaModal(false)}
-        />
-      )}
-
-      {showQrSelfOrderModal && (
-        <QrSelfOrderModal
-          onClose={() => setShowQrSelfOrderModal(false)}
-        />
-      )}
-
-      {showGiftCardWalletModal && (
-        <GiftCardWalletModal
-          onClose={() => setShowGiftCardWalletModal(false)}
-        />
-      )}
-
+      {/* Operational Modals */}
+      {showAiBaristaModal && <AiBaristaModal onClose={() => setShowAiBaristaModal(false)} />}
+      {showQrSelfOrderModal && <QrSelfOrderModal onClose={() => setShowQrSelfOrderModal(false)} />}
+      {showGiftCardWalletModal && <GiftCardWalletModal onClose={() => setShowGiftCardWalletModal(false)} />}
       {customizeProduct && (
         <VariantToppingModal
           product={customizeProduct}
@@ -1123,26 +1289,9 @@ export const PosPage: React.FC = () => {
           onAddToCart={addToCart}
         />
       )}
-
-      {recipeProduct && (
-        <RecipeModal
-          product={recipeProduct}
-          onClose={() => setRecipeProduct(null)}
-        />
-      )}
-
-      {showCashDrawerModal && (
-        <CashDrawerModal
-          onClose={() => setShowCashDrawerModal(false)}
-        />
-      )}
-
-      {showAiForecastModal && (
-        <AiForecastModal
-          onClose={() => setShowAiForecastModal(false)}
-        />
-      )}
-
+      {recipeProduct && <RecipeModal product={recipeProduct} onClose={() => setRecipeProduct(null)} />}
+      {showCashDrawerModal && <CashDrawerModal onClose={() => setShowCashDrawerModal(false)} />}
+      {showAiForecastModal && <AiForecastModal onClose={() => setShowAiForecastModal(false)} />}
       {showHoldModal && (
         <HoldOrderModal
           activeCart={cart}
@@ -1153,7 +1302,6 @@ export const PosPage: React.FC = () => {
           onDeleteHeldOrder={handleDeleteHeldOrder}
         />
       )}
-
       {showSplitModal && (
         <SplitBillModal
           order={{
@@ -1173,20 +1321,22 @@ export const PosPage: React.FC = () => {
           onClose={() => setShowSplitModal(false)}
           onConfirmSplit={(parts, perPart) => {
             setShowSplitModal(false);
-            alert(`Bill split into ${parts} shares of $${perPart.toFixed(2)} each. Launching checkout for share #1.`);
+            showToastNotification(
+              `Bill split into ${parts} shares of $${perPart.toFixed(2)} each. Launching checkout.`,
+              'info'
+            );
             handleInitiateCheckout();
           }}
         />
       )}
-
       {activePaymentOrder && (
         <PaymentModal
           order={activePaymentOrder}
+          khrRate={khrExchangeRate}
           onClose={() => setActivePaymentOrder(null)}
           onPaymentComplete={handlePaymentCompleted}
         />
       )}
-
       {completedReceiptOrder && (
         <ThermalReceiptModal
           order={completedReceiptOrder}
@@ -1194,16 +1344,7 @@ export const PosPage: React.FC = () => {
           onPrintCupLabels={() => setCupLabelOrder(completedReceiptOrder)}
         />
       )}
-
-      {/* Quick Screen Lock Modal */}
-      {isScreenLocked && (
-        <PosScreenLockModal
-          user={user}
-          onUnlock={() => setIsScreenLocked(false)}
-        />
-      )}
-
-      {/* Manager Authorization PIN Modal */}
+      {isScreenLocked && <PosScreenLockModal user={user} onUnlock={() => setIsScreenLocked(false)} />}
       {managerPinAction && (
         <ManagerPinModal
           actionTitle={managerPinAction.title}
@@ -1217,31 +1358,9 @@ export const PosPage: React.FC = () => {
           onClose={() => setManagerPinAction(null)}
         />
       )}
-
-      {/* Security Audit Trail & Anti-Theft Log Modal */}
-      {showSecurityAuditModal && (
-        <SecurityAuditModal
-          onClose={() => setShowSecurityAuditModal(false)}
-        />
-      )}
-
-      {/* End-of-Day Z-Report Closeout Modal */}
-      {showZReportModal && (
-        <ZReportModal
-          onClose={() => setShowZReportModal(false)}
-          cashierName={user?.name || 'Cashier'}
-        />
-      )}
-
-      {/* Petty Cash Out-of-Pocket Expense Modal */}
-      {showPettyCashModal && (
-        <PettyCashModal
-          onClose={() => setShowPettyCashModal(false)}
-          cashierName={user?.name || 'Cashier'}
-        />
-      )}
-
-      {/* Automated Promotions & Happy Hour Engine Modal */}
+      {showSecurityAuditModal && <SecurityAuditModal onClose={() => setShowSecurityAuditModal(false)} />}
+      {showZReportModal && <ZReportModal onClose={() => setShowZReportModal(false)} cashierName={user?.name || 'Cashier'} />}
+      {showPettyCashModal && <PettyCashModal onClose={() => setShowPettyCashModal(false)} cashierName={user?.name || 'Cashier'} />}
       {showPromotionModal && (
         <PromotionManagerModal
           onClose={() => setShowPromotionModal(false)}
@@ -1255,20 +1374,14 @@ export const PosPage: React.FC = () => {
               setDiscountPercent(promo.value);
             }
             soundEffects.playSuccess();
-            alert(`បានអនុវត្តប្រូម៉ូសិន: ${promo.nameKh} (${promo.type === 'FIXED' ? `$${promo.value.toFixed(2)}` : `${promo.value}%`} OFF)`);
+            showToastNotification(
+              `Applied promotion "${promo.name}": ${promo.type === 'FIXED' ? `$${promo.value.toFixed(2)}` : `${promo.value}%`} OFF`,
+              'success'
+            );
           }}
         />
       )}
-
-      {/* Store Broadcast Notice Modal */}
-      {showBroadcastModal && (
-        <BroadcastModal
-          onClose={() => setShowBroadcastModal(false)}
-          authorName={user?.name || 'Cashier'}
-        />
-      )}
-
-      {/* Dine-In Table Picker Modal */}
+      {showBroadcastModal && <BroadcastModal onClose={() => setShowBroadcastModal(false)} authorName={user?.name || 'Cashier'} />}
       {showTablePickerModal && (
         <TablePickerModal
           selectedTable={selectedTable}
@@ -1276,45 +1389,22 @@ export const PosPage: React.FC = () => {
           onClose={() => setShowTablePickerModal(false)}
         />
       )}
-
-      {/* Order History, Re-print Receipt & Refunds Modal */}
       {showOrderHistoryModal && (
         <OrderHistoryModal
           onClose={() => setShowOrderHistoryModal(false)}
-          onReprintReceipt={(order) => {
-            setCompletedReceiptOrder(order);
-          }}
-          onPrintCupLabels={(order) => {
-            setCupLabelOrder(order);
-          }}
-          onRequestManagerPin={(action) => {
-            setManagerPinAction(action);
-          }}
+          onReprintReceipt={(order) => setCompletedReceiptOrder(order)}
+          onPrintCupLabels={(order) => setCupLabelOrder(order)}
+          onRequestManagerPin={(action) => setManagerPinAction(action)}
         />
       )}
+      {showXReportModal && <XReportModal outgoingCashier={user?.name || 'Cashier'} onClose={() => setShowXReportModal(false)} />}
+      {cupLabelOrder && <CupLabelModal order={cupLabelOrder} onClose={() => setCupLabelOrder(null)} />}
 
-      {/* Mid-Day Shift Handover X-Report Modal */}
-      {showXReportModal && (
-        <XReportModal
-          outgoingCashier={user?.name || 'Cashier'}
-          onClose={() => setShowXReportModal(false)}
-        />
-      )}
-
-      {/* Cup Sticker Label Printer Modal (40x30mm) */}
-      {cupLabelOrder && (
-        <CupLabelModal
-          order={cupLabelOrder}
-          onClose={() => setCupLabelOrder(null)}
-        />
-      )}
-
-      {/* Floating Hardware Barcode Scan Toast */}
       {lastScannedItem && (
-        <div className="fixed bottom-6 left-6 z-50 bg-emerald-950/95 border border-emerald-500 text-emerald-200 px-5 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <Barcode className="w-5 h-5 text-emerald-400 animate-pulse" />
+        <div className="fixed bottom-20 lg:bottom-6 left-4 z-50 bg-emerald-950/95 border border-emerald-500 text-emerald-200 px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5">
+          <Barcode className="w-4 h-4 text-emerald-400 animate-pulse" />
           <div>
-            <p className="text-[10px] text-emerald-400 uppercase font-bold tracking-wider">USB Barcode Scanned</p>
+            <p className="text-[10px] text-emerald-400 uppercase font-bold">SKU Scanned</p>
             <p className="text-xs font-bold text-white">{lastScannedItem}</p>
           </div>
         </div>

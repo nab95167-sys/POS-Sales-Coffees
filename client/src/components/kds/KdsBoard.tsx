@@ -1,11 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Clock, CheckCircle, Utensils, Coffee, Filter } from 'lucide-react';
+import { Clock, CheckCircle, Utensils, Coffee, Filter, RefreshCw, AlertCircle } from 'lucide-react';
 import { Order, OrderStatus } from '../../types';
 import { fetchOrders, updateOrderStatusApi } from '../../services/orderService';
+import { showToastNotification } from '../../services/telegramBotService';
+import { useLanguage } from '../../context/LanguageContext';
+import { PageHeader } from '../ui/PageHeader';
 
 export const KdsBoard: React.FC = () => {
+  const { t } = useLanguage();
   const [orders, setOrders] = useState<Order[]>([]);
   const [activeFilter, setActiveFilter] = useState<'ALL' | OrderStatus>('ALL');
+  const [loading, setLoading] = useState(true);
 
   const loadKdsOrders = useCallback(async () => {
     try {
@@ -13,6 +18,8 @@ export const KdsBoard: React.FC = () => {
       setOrders(list.filter((o) => !o.isRefunded && o.status !== 'CANCELLED'));
     } catch (err) {
       console.error('Failed to load KDS orders:', err);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -38,10 +45,15 @@ export const KdsBoard: React.FC = () => {
     try {
       const updated = await updateOrderStatusApi(orderId, nextStatus);
       setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+      showToastNotification(`Order ${updated.orderNumber} → ${nextStatus}`, 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to update ticket status');
+      showToastNotification(err instanceof Error ? err.message : 'Failed to update ticket status', 'error');
     }
   };
+
+  const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
+  const preparingCount = orders.filter((o) => o.status === 'PREPARING').length;
+  const readyCount = orders.filter((o) => o.status === 'READY').length;
 
   const filteredOrders = orders.filter((o) => {
     if (activeFilter === 'ALL') return o.status !== 'COMPLETED';
@@ -50,34 +62,58 @@ export const KdsBoard: React.FC = () => {
 
   const getElapsedMinutes = (dateStr: string) => {
     const elapsedMs = Date.now() - new Date(dateStr).getTime();
-    return Math.floor(elapsedMs / 60000);
+    return Math.max(0, Math.floor(elapsedMs / 60000));
   };
 
   return (
-    <div className="space-y-6">
-      {/* Top Header & Filter Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-stone-900/80 p-4 rounded-3xl border border-stone-800 glass-panel">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-2xl bg-amber-600/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-            <Utensils className="w-5 h-5" />
+    <div className="space-y-5 font-sans">
+      <PageHeader
+        icon={<Utensils className="w-5 h-5" />}
+        title={t('kdsTitle')}
+        subtitle={t('kdsSub')}
+        badge={`${pendingCount + preparingCount + readyCount} Active`}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void loadKdsOrders()}
+              className="px-3 py-2 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-zinc-200 text-xs font-bold flex items-center gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>{t('refresh')}</span>
+            </button>
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-stone-100">Kitchen Display System (KDS)</h2>
-            <p className="text-xs text-stone-400">Live order queue & ticket management for Baristas</p>
+        }
+      />
+
+      {/* Live Status Counters + Filter Strip */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="grid grid-cols-3 gap-2.5 sm:flex sm:items-center">
+          <div className="px-3.5 py-2 rounded-xl glass-card flex items-center justify-between gap-2 text-xs">
+            <span className="text-zinc-400 font-semibold">Pending</span>
+            <span className="font-mono font-black text-amber-400">{pendingCount}</span>
+          </div>
+          <div className="px-3.5 py-2 rounded-xl glass-card flex items-center justify-between gap-2 text-xs">
+            <span className="text-zinc-400 font-semibold">Preparing</span>
+            <span className="font-mono font-black text-sky-400">{preparingCount}</span>
+          </div>
+          <div className="px-3.5 py-2 rounded-xl glass-card flex items-center justify-between gap-2 text-xs">
+            <span className="text-zinc-400 font-semibold">Ready</span>
+            <span className="font-mono font-black text-emerald-400">{readyCount}</span>
           </div>
         </div>
 
-        {/* Filter Badges */}
-        <div className="flex items-center space-x-2 overflow-x-auto pb-1 md:pb-0">
-          <Filter className="w-4 h-4 text-stone-400 mr-1" />
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          <Filter className="w-3.5 h-3.5 text-zinc-400 mr-1 flex-shrink-0" />
           {(['ALL', 'PENDING', 'PREPARING', 'READY', 'COMPLETED'] as const).map((st) => (
             <button
               key={st}
+              type="button"
               onClick={() => setActiveFilter(st)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
                 activeFilter === st
-                  ? 'bg-amber-600 text-stone-950 shadow-lg shadow-amber-900/30'
-                  : 'bg-stone-800/60 text-stone-300 hover:bg-stone-800'
+                  ? 'gold-gradient-bg text-zinc-950 shadow-md'
+                  : 'bg-white/[0.04] border border-white/10 text-zinc-300 hover:bg-white/[0.08]'
               }`}
             >
               {st === 'ALL' ? 'Active Queue' : st}
@@ -88,13 +124,13 @@ export const KdsBoard: React.FC = () => {
 
       {/* Tickets Grid */}
       {filteredOrders.length === 0 ? (
-        <div className="text-center py-20 bg-stone-900/40 border border-stone-800/60 rounded-3xl glass-card">
-          <Coffee className="w-12 h-12 text-stone-600 mx-auto mb-3" />
-          <h3 className="text-lg font-bold text-stone-300">No Orders in Queue</h3>
-          <p className="text-xs text-stone-500 mt-1">New incoming orders from POS will appear here live.</p>
+        <div className="text-center py-20 glass-card rounded-2xl space-y-2">
+          <Coffee className="w-11 h-11 text-zinc-600 mx-auto" />
+          <h3 className="text-base font-bold text-zinc-200">No Orders in Queue</h3>
+          <p className="text-xs text-zinc-500">New incoming orders from POS will appear here live.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
           {filteredOrders.map((order) => {
             const elapsed = getElapsedMinutes(order.createdAt);
             const isLate = elapsed > 10;
@@ -103,86 +139,84 @@ export const KdsBoard: React.FC = () => {
             return (
               <div
                 key={order.id}
-                className={`bg-stone-900 border rounded-3xl overflow-hidden shadow-xl flex flex-col justify-between transition-all ${
+                className={`glass-card rounded-2xl overflow-hidden shadow-xl flex flex-col justify-between transition-all ${
                   isCritical
-                    ? 'border-red-500/80 shadow-red-950/30'
+                    ? 'border-red-500/70'
                     : isLate
-                    ? 'border-amber-500/80 shadow-amber-950/30'
-                    : 'border-stone-800 hover:border-amber-700/50'
+                    ? 'border-amber-500/70'
+                    : 'border-white/10 hover:border-amber-500/40'
                 }`}
               >
-                {/* Ticket Header */}
                 <div
-                  className={`p-4 border-b flex items-center justify-between ${
+                  className={`p-4 border-b flex items-center justify-between gap-2 ${
                     order.status === 'PREPARING'
-                      ? 'bg-amber-950/40 border-amber-900/40'
+                      ? 'bg-sky-950/35 border-sky-500/25'
                       : order.status === 'READY'
-                      ? 'bg-emerald-950/40 border-emerald-900/40'
-                      : 'bg-stone-950 border-stone-800'
+                      ? 'bg-emerald-950/35 border-emerald-500/25'
+                      : 'bg-[#0b0c10] border-white/10'
                   }`}
                 >
                   <div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-lg font-extrabold text-stone-100 font-mono">{order.orderNumber}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-stone-800 text-stone-300">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base font-black text-zinc-100 font-mono">{order.orderNumber}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/[0.06] text-zinc-300">
                         {order.type.replace('_', ' ')}
                       </span>
                     </div>
                     {order.tableName && <span className="text-xs text-amber-400 font-semibold">{order.tableName}</span>}
                   </div>
 
-                  {/* Elapsed Timer */}
                   <div
-                    className={`flex items-center space-x-1.5 px-3 py-1 rounded-xl text-xs font-mono font-bold ${
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-mono font-bold ${
                       isCritical
-                        ? 'bg-red-500/20 text-red-400 border border-red-500/40 animate-pulse'
+                        ? 'bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse'
                         : isLate
                         ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                        : 'bg-stone-800 text-stone-300'
+                        : 'bg-zinc-900 text-zinc-300 border border-white/10'
                     }`}
                   >
                     <Clock className="w-3.5 h-3.5" />
-                    <span>{elapsed}m ago</span>
+                    <span>{elapsed}m</span>
                   </div>
                 </div>
 
-                {/* Items List */}
-                <div className="p-5 space-y-3 flex-1 overflow-y-auto max-h-64">
+                <div className="p-4 space-y-2.5 flex-1 overflow-y-auto max-h-64">
                   {order.items.map((item, idx) => (
-                    <div key={idx} className="p-3 rounded-2xl bg-stone-950/60 border border-stone-800/80 space-y-1">
-                      <div className="flex justify-between items-start">
-                        <span className="text-sm font-bold text-stone-100">
-                          <span className="text-amber-400 mr-2">{item.quantity}x</span>
+                    <div key={idx} className="p-3 rounded-xl bg-[#0b0c10] border border-white/10 space-y-1">
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="text-sm font-bold text-zinc-100">
+                          <span className="text-amber-400 font-mono mr-2">{item.quantity}x</span>
                           {item.name}
                         </span>
                         {item.selectedVariant && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded bg-stone-800 text-amber-300">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-zinc-800 text-amber-300 flex-shrink-0">
                             {item.selectedVariant.name}
                           </span>
                         )}
                       </div>
 
                       {item.selectedToppings.length > 0 && (
-                        <div className="text-xs text-stone-400 pl-5">
-                          + {item.selectedToppings.map((t) => t.name).join(', ')}
+                        <div className="text-xs text-zinc-400 pl-6">
+                          + {item.selectedToppings.map((tp) => tp.name).join(', ')}
                         </div>
                       )}
 
                       {item.notes && (
-                        <div className="text-xs font-medium text-red-400 bg-red-950/40 px-2.5 py-1 rounded-lg border border-red-900/30 mt-1">
-                          ⚠️ {item.notes}
+                        <div className="text-xs font-semibold text-amber-300 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/25 flex items-center gap-1.5 mt-1">
+                          <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span>{item.notes}</span>
                         </div>
                       )}
                     </div>
                   ))}
                 </div>
 
-                {/* Status Action Buttons */}
-                <div className="p-4 bg-stone-950/80 border-t border-stone-800/80">
+                <div className="p-3.5 bg-[#0b0c10] border-t border-white/10">
                   {order.status === 'PENDING' && (
                     <button
-                      onClick={() => updateOrderStatus(order.id, 'PREPARING')}
-                      className="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center justify-center space-x-2 transition-all shadow-lg shadow-amber-900/30"
+                      type="button"
+                      onClick={() => void updateOrderStatus(order.id, 'PREPARING')}
+                      className="w-full py-2.5 rounded-xl gold-gradient-bg hover:brightness-110 text-zinc-950 font-extrabold text-xs flex items-center justify-center gap-2 transition-all"
                     >
                       <Coffee className="w-4 h-4" />
                       <span>Start Preparing</span>
@@ -191,8 +225,9 @@ export const KdsBoard: React.FC = () => {
 
                   {order.status === 'PREPARING' && (
                     <button
-                      onClick={() => updateOrderStatus(order.id, 'READY')}
-                      className="w-full py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold text-xs flex items-center justify-center space-x-2 transition-all shadow-lg shadow-emerald-900/30"
+                      type="button"
+                      onClick={() => void updateOrderStatus(order.id, 'READY')}
+                      className="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-extrabold text-xs flex items-center justify-center gap-2 transition-all"
                     >
                       <CheckCircle className="w-4 h-4" />
                       <span>Mark Order Ready</span>
@@ -201,8 +236,9 @@ export const KdsBoard: React.FC = () => {
 
                   {order.status === 'READY' && (
                     <button
-                      onClick={() => updateOrderStatus(order.id, 'COMPLETED')}
-                      className="w-full py-3 rounded-2xl bg-stone-800 hover:bg-stone-700 text-stone-200 font-bold text-xs flex items-center justify-center space-x-2 transition-all"
+                      type="button"
+                      onClick={() => void updateOrderStatus(order.id, 'COMPLETED')}
+                      className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold text-xs flex items-center justify-center gap-2 transition-all"
                     >
                       <CheckCircle className="w-4 h-4 text-emerald-400" />
                       <span>Complete & Handover</span>
